@@ -35,9 +35,7 @@ namespace nncpp {
                 }
 
                 neuron.z = neuron.bias;
-                for (std::size_t weightIndex = 0;
-                     weightIndex < neuron.weights.size();
-                     ++weightIndex) {
+                for (std::size_t weightIndex = 0; weightIndex < neuron.weights.size(); ++weightIndex) {
                     neuron.z +=
                             neuron.weights[weightIndex] *
                             previousLayer[weightIndex].activation;

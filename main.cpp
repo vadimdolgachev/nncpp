@@ -49,7 +49,6 @@ int main() {
             break;
         }
         nncpp::calculateDeltas(network, targets);
-        // nncpp::updateGradient(network);
         nncpp::optimizeParams(network, learningRate);
     }
 
