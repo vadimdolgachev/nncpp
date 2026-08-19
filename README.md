@@ -251,8 +251,7 @@ $$
 the chain rule gives:
 
 $$
-\frac{\partial E}{\partial x}
-=
+\frac{\partial E}{\partial x} =
 \frac{\partial E}{\partial y}
 \frac{\partial y}{\partial x}
 $$
@@ -284,8 +283,7 @@ the sigmoid derivative is:
 
 $$
 \boxed{
-\frac{\partial a}{\partial z}
-=
+\frac{\partial a}{\partial z} =
 a(1-a)
 }
 $$
@@ -300,8 +298,7 @@ then the chain rule gives:
 
 $$
 \boxed{
-\frac{\partial E}{\partial z}
-=
+\frac{\partial E}{\partial z} =
 \frac{\partial E}{\partial a}
 a(1-a)
 }
@@ -353,8 +350,7 @@ and:
 
 $$
 \boxed{
-\frac{\partial E}{\partial W_{ji}}
-=
+\frac{\partial E}{\partial W_{ji}} =
 \frac{\partial E}{\partial y_j}x_i
 }
 $$
@@ -378,8 +374,7 @@ we obtain:
 
 $$
 \boxed{
-\frac{\partial E}{\partial b_j}
-=
+\frac{\partial E}{\partial b_j} =
 \frac{\partial E}{\partial y_j}
 }
 $$
@@ -404,8 +399,7 @@ we obtain:
 
 $$
 \boxed{
-\frac{\partial E}{\partial x_i}
-=
+\frac{\partial E}{\partial x_i} =
 \sum_j
 W_{ji}
 \frac{\partial E}{\partial y_j}
@@ -416,8 +410,7 @@ or, in matrix notation:
 
 $$
 \boxed{
-\frac{\partial E}{\partial x}
-=
+\frac{\partial E}{\partial x} =
 W^T
 \frac{\partial E}{\partial y}
 }
@@ -643,8 +636,7 @@ For `Sigmoid`:
 
 $$
 \boxed{
-\frac{\partial E}{\partial z}
-=
+\frac{\partial E}{\partial z} =
 \frac{\partial E}{\partial a}a(1-a)
 }
 $$
@@ -653,24 +645,21 @@ For `DenseLayer`:
 
 $$
 \boxed{
-\frac{\partial E}{\partial W}
-=
+\frac{\partial E}{\partial W} =
 \frac{\partial E}{\partial y}x^T
 }
 $$
 
 $$
 \boxed{
-\frac{\partial E}{\partial b}
-=
+\frac{\partial E}{\partial b} =
 \frac{\partial E}{\partial y}
 }
 $$
 
 $$
 \boxed{
-\frac{\partial E}{\partial x}
-=
+\frac{\partial E}{\partial x} =
 W^T\frac{\partial E}{\partial y}
 }
 $$
