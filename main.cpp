@@ -5,7 +5,7 @@
 #include <vector>
 
 namespace {
-    constexpr double learningRate = 0.001;
+    constexpr double learningRate = 0.01;
     constexpr double errorEpsilon = 1e-4;
     constexpr std::size_t maxTrainIterations = 1'000'000;
 
@@ -37,9 +37,10 @@ namespace {
     }
 }
 
-int main() {
+static void simpleNetworkExample() {
     const std::vector input = {0.25, 0.5};
     const std::vector targets = {1.0};
+
     nncpp::Network network = makeNetwork(input);
 
     std::size_t iterations = 0;
@@ -62,5 +63,58 @@ int main() {
     if (finalError >= errorEpsilon) {
         throw std::runtime_error("training did not converge");
     }
+}
+
+static void newNetworkExample() {
+    const std::vector input = {0.25, 0.5};
+    const std::vector targets = {1.0};
+
+    nncpp::DenseLayer dense1(2, 4);
+    nncpp::Sigmoid sigmoid1(4);
+    nncpp::DenseLayer dense2(4, 1);
+    nncpp::Sigmoid sigmoid2(1);
+
+    size_t iterations = 0;
+    for (; iterations < maxTrainIterations; ++iterations) {
+        const auto z1 = dense1.forward(input);
+        const auto a1 = sigmoid1.forward(z1);
+        const auto z2 = dense2.forward(a1);
+        const auto output = sigmoid2.forward(z2);
+
+        if (nncpp::loss(output, targets) < errorEpsilon) {
+            break;
+        }
+
+        dense1.resetGradients();
+        dense2.resetGradients();
+
+        auto gradient = nncpp::derivativeMSE(output, targets);
+        gradient = sigmoid2.backward(gradient);
+        gradient = dense2.backward(gradient);
+        gradient = sigmoid1.backward(gradient);
+        const auto inputGradient = dense1.backward(gradient);
+        static_cast<void>(inputGradient);
+
+        dense2.applyGradient(learningRate);
+        dense1.applyGradient(learningRate);
+    }
+    const auto z1 = dense1.forward(input);
+    const auto a1 = sigmoid1.forward(z1);
+    const auto z2 = dense2.forward(a1);
+    const auto output = sigmoid2.forward(z2);
+
+    const double finalError = nncpp::loss(output, targets);
+    std::cout << "iterations: " << iterations << '\n';
+    std::cout << "output: " << output[0] << '\n';
+    std::cout << "error: " << finalError << '\n';
+
+    if (finalError >= errorEpsilon) {
+        throw std::runtime_error("training did not converge");
+    }
+}
+
+int main() {
+    simpleNetworkExample();
+    newNetworkExample();
     return 0;
 }

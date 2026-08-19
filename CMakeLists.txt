@@ -18,6 +18,7 @@ function(configure_nncpp_compile target)
         -Wsign-conversion
         -Wnull-dereference
         -Werror=uninitialized
+        -Werror=return-type
         -fno-omit-frame-pointer
         $<$<STREQUAL:${SANITIZER},address>:-fsanitize=address>
         $<$<STREQUAL:${SANITIZER},thread>:-fsanitize=thread>
@@ -52,4 +53,14 @@ if(BUILD_TESTING)
     target_link_libraries(backpropagation_test PRIVATE nncpp_core)
     configure_nncpp_executable(backpropagation_test)
     add_test(NAME backpropagation COMMAND backpropagation_test)
+
+    add_executable(dense_layer_test tests/dense_layer_test.cpp)
+    target_link_libraries(dense_layer_test PRIVATE nncpp_core)
+    configure_nncpp_executable(dense_layer_test)
+    add_test(NAME dense_layer COMMAND dense_layer_test)
+
+    add_executable(layer_chain_test tests/layer_chain_test.cpp)
+    target_link_libraries(layer_chain_test PRIVATE nncpp_core)
+    configure_nncpp_executable(layer_chain_test)
+    add_test(NAME layer_chain COMMAND layer_chain_test)
 endif()

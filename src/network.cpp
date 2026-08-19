@@ -17,6 +17,29 @@ namespace nncpp {
         return 0.5 * difference * difference;
     }
 
+    std::vector<double> MSE(const std::vector<double> &output, const std::vector<double> &target) {
+        if (output.size() != target.size()) {
+            throw std::invalid_argument("output do not match output layer");
+        }
+        std::vector<double> outputVector(output.size());
+        for (std::size_t i = 0; i < output.size(); ++i) {
+            outputVector[i] = MSE(output[i], target[i]);
+        }
+        return outputVector;
+    }
+
+    std::vector<double> derivativeMSE(const std::vector<double> &output, const std::vector<double> &target) {
+        if (output.size() != target.size()) {
+            throw std::invalid_argument("output and target sizes differ");
+        }
+
+        std::vector<double> gradient(output.size());
+        for (std::size_t i = 0; i < output.size(); ++i) {
+            gradient[i] = output[i] - target[i];
+        }
+        return gradient;
+    }
+
     double outputDelta(const double output, const double target) {
         return (output - target) * derivativeSigmoid(output);
     }
@@ -34,13 +57,11 @@ namespace nncpp {
                     throw std::logic_error("neuron weights do not match previous layer");
                 }
 
-                neuron.z = neuron.bias;
+                double z = neuron.bias;
                 for (std::size_t weightIndex = 0; weightIndex < neuron.weights.size(); ++weightIndex) {
-                    neuron.z +=
-                            neuron.weights[weightIndex] *
-                            previousLayer[weightIndex].activation;
+                    z += neuron.weights[weightIndex] * previousLayer[weightIndex].activation;
                 }
-                neuron.activation = sigmoid(neuron.z);
+                neuron.activation = sigmoid(z);
             }
         }
     }
@@ -52,6 +73,7 @@ namespace nncpp {
         if (targets.size() != network.back().size()) {
             throw std::invalid_argument("targets do not match output layer");
         }
+
         for (std::size_t neuronIndex = 0; neuronIndex < network.back().size(); ++neuronIndex) {
             Neuron &neuron = network.back()[neuronIndex];
             neuron.delta = outputDelta(neuron.activation, targets[neuronIndex]);
@@ -79,32 +101,6 @@ namespace nncpp {
         }
     }
 
-    NetworkGradient updateGradient(const Network &network) {
-        NetworkGradient gradient;
-
-        if (network.size() < 2) {
-            throw std::invalid_argument("network must contain at least two layers");
-        }
-        for (std::size_t layerIndex = 1; layerIndex < network.size(); ++layerIndex) {
-            const auto &prevLayer = network[layerIndex - 1];
-
-
-            for (size_t neuronIndex = 0; neuronIndex  < network[layerIndex].size(); ++neuronIndex) {
-                if (network[layerIndex][neuronIndex].weights.size() != prevLayer.size()) {
-                    throw std::logic_error("neuron weights do not match previous layer");
-                }
-
-                for (std::size_t weightIndex = 0; weightIndex < network[layerIndex][neuronIndex].weights.size(); ++weightIndex) {
-                    const double dE_dw = network[layerIndex][neuronIndex].delta * prevLayer[weightIndex].activation;
-                    gradient[layerIndex][neuronIndex].weights[weightIndex] += dE_dw;
-                }
-                const double dE_db = network[layerIndex][neuronIndex].delta;
-                gradient[layerIndex][neuronIndex].bias += dE_db;
-            }
-        }
-        return gradient;
-    }
-
     void optimizeParams(Network &network, const double learningRate) {
         if (network.size() < 2) {
             throw std::invalid_argument("network must contain at least two layers");
@@ -130,6 +126,14 @@ namespace nncpp {
         }
     }
 
+    double loss(const std::vector<double> &output, const std::vector<double> &targets) {
+        double total = 0.0;
+        for (std::size_t index = 0; index < output.size(); ++index) {
+            total += MSE(output[index], targets[index]);
+        }
+        return total;
+    }
+
     double loss(const Layer &outputs, const std::vector<double> &targets) {
         if (outputs.size() != targets.size()) {
             throw std::invalid_argument("targets do not match output layer");
@@ -140,5 +144,12 @@ namespace nncpp {
             total += MSE(outputs[index].activation, targets[index]);
         }
         return total;
+    }
+
+    std::vector<double> &sigmoid(std::vector<double> &input) {
+        for (double &index: input) {
+            index = sigmoid(index);
+        }
+        return input;
     }
 }
