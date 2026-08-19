@@ -17,13 +17,13 @@ int main() {
     }
 
     nncpp::DenseLayer layer(2, 4);
-    constexpr double xavierLimit = 1.0;
-    for (const double weight : layer.getWeights()) {
+    constexpr nncpp::Scalar xavierLimit = 1.0f;
+    for (const nncpp::Scalar weight : layer.getWeights()) {
         if (weight < -xavierLimit || weight > xavierLimit) {
             throw std::runtime_error("weight is outside Xavier range");
         }
     }
-    for (const double gradient : layer.getWeightGradients()) {
+    for (const nncpp::Scalar gradient : layer.getWeightGradients()) {
         expectNear(gradient, 0.0, "initial weight gradient");
     }
     for (std::size_t index = 0; index < layer.getBiases().size(); ++index) {
@@ -72,7 +72,7 @@ int main() {
         throw std::runtime_error("backward accepted a missing forward pass");
     }
 
-    const std::vector<double> output = layer.forward({0.25, 0.5});
+    const nncpp::Tensor output = layer.forward({0.25f, 0.5f});
     constexpr std::array<double, 4> expectedOutput = {
         0.125, 0.125, -0.175, 0.575,
     };
@@ -80,8 +80,8 @@ int main() {
         expectNear(output[index], expectedOutput[index], "dense output");
     }
 
-    const std::vector<double> inputGradient =
-        layer.backward({1.0, 2.0, 3.0, 4.0});
+    const nncpp::Tensor inputGradient =
+        layer.backward({1.0f, 2.0f, 3.0f, 4.0f});
     expectNear(inputGradient[0], 3.8, "input gradient 0");
     expectNear(inputGradient[1], 2.4, "input gradient 1");
 
@@ -124,9 +124,9 @@ int main() {
         throw std::runtime_error("applyGradient accepted zero learning rate");
     }
 
-    const std::vector<double> weightsBefore = layer.getWeights();
-    const std::vector<double> biasesBefore = layer.getBiases();
-    constexpr double learningRate = 0.1;
+    const nncpp::Tensor weightsBefore = layer.getWeights();
+    const nncpp::Tensor biasesBefore = layer.getBiases();
+    constexpr nncpp::Scalar learningRate = 0.1f;
     layer.applyGradient(learningRate);
 
     for (std::size_t index = 0; index < weightsBefore.size(); ++index) {
@@ -152,10 +152,10 @@ int main() {
     }
 
     layer.resetGradients();
-    for (const double gradient : layer.getWeightGradients()) {
+    for (const nncpp::Scalar gradient : layer.getWeightGradients()) {
         expectNear(gradient, 0.0, "reset weight gradient");
     }
-    for (const double gradient : layer.getBiasGradients()) {
+    for (const nncpp::Scalar gradient : layer.getBiasGradients()) {
         expectNear(gradient, 0.0, "reset bias gradient");
     }
 

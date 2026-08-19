@@ -3,7 +3,7 @@
 #include <array>
 
 int main() {
-    nncpp::Network network = makeTestNetwork();
+    std::vector<std::vector<nncpp::Neuron>> network = makeTestNetwork();
     nncpp::forwardPass(network);
 
     constexpr std::array expectedHiddenActivations = {

@@ -4,47 +4,47 @@
 #include <stdexcept>
 
 namespace nncpp {
-    double sigmoid(const double value) {
-        return 1.0 / (1.0 + std::exp(-value));
+    Scalar sigmoid(const Scalar value) {
+        return 1.0f / (1.0f + std::exp(-value));
     }
 
-    double derivativeSigmoid(const double activation) {
-        return activation * (1.0 - activation);
+    Scalar derivativeSigmoid(const Scalar activation) {
+        return activation * (1.0f - activation);
     }
 
-    double MSE(const double output, const double target) {
-        const double difference = output - target;
-        return 0.5 * difference * difference;
+    Scalar MSE(const Scalar output, const Scalar target) {
+        const Scalar difference = output - target;
+        return 0.5f * difference * difference;
     }
 
-    std::vector<double> MSE(const std::vector<double> &output, const std::vector<double> &target) {
+    Tensor MSE(const Tensor &output, const Tensor &target) {
         if (output.size() != target.size()) {
             throw std::invalid_argument("output do not match output layer");
         }
-        std::vector<double> outputVector(output.size());
+        Tensor outputVector(output.size());
         for (std::size_t i = 0; i < output.size(); ++i) {
             outputVector[i] = MSE(output[i], target[i]);
         }
         return outputVector;
     }
 
-    std::vector<double> derivativeMSE(const std::vector<double> &output, const std::vector<double> &target) {
+    Tensor derivativeMSE(const Tensor &output, const Tensor &target) {
         if (output.size() != target.size()) {
             throw std::invalid_argument("output and target sizes differ");
         }
 
-        std::vector<double> gradient(output.size());
+        Tensor gradient(output.size());
         for (std::size_t i = 0; i < output.size(); ++i) {
             gradient[i] = output[i] - target[i];
         }
         return gradient;
     }
 
-    double outputDelta(const double output, const double target) {
+    Scalar outputDelta(const Scalar output, const Scalar target) {
         return (output - target) * derivativeSigmoid(output);
     }
 
-    void forwardPass(Network &network) {
+    void forwardPass(std::vector<std::vector<Neuron> > &network) {
         if (network.empty()) {
             throw std::invalid_argument("network must not be empty");
         }
@@ -57,7 +57,7 @@ namespace nncpp {
                     throw std::logic_error("neuron weights do not match previous layer");
                 }
 
-                double z = neuron.bias;
+                auto z = neuron.bias;
                 for (std::size_t weightIndex = 0; weightIndex < neuron.weights.size(); ++weightIndex) {
                     z += neuron.weights[weightIndex] * previousLayer[weightIndex].activation;
                 }
@@ -66,7 +66,7 @@ namespace nncpp {
         }
     }
 
-    void calculateDeltas(Network &network, const std::vector<double> &targets) {
+    void calculateDeltas(std::vector<std::vector<Neuron> > &network, const Tensor &targets) {
         if (network.size() < 2) {
             throw std::invalid_argument("network must contain at least two layers");
         }
@@ -90,7 +90,7 @@ namespace nncpp {
             }
 
             for (std::size_t neuronIndex = 0; neuronIndex < currentLayerSize; ++neuronIndex) {
-                double dE_da = 0.0;
+                Scalar dE_da = 0.0f;
                 for (const Neuron &nextNeuron: nextLayer) {
                     dE_da += nextNeuron.delta * nextNeuron.weights[neuronIndex];
                 }
@@ -101,7 +101,7 @@ namespace nncpp {
         }
     }
 
-    void optimizeParams(Network &network, const double learningRate) {
+    void optimizeParams(std::vector<std::vector<Neuron> > &network, const Scalar learningRate) {
         if (network.size() < 2) {
             throw std::invalid_argument("network must contain at least two layers");
         }
@@ -117,37 +117,41 @@ namespace nncpp {
                 }
 
                 for (std::size_t weightIndex = 0; weightIndex < neuron.weights.size(); ++weightIndex) {
-                    const double dE_dw = neuron.delta * prevLayer[weightIndex].activation;
+                    const Scalar dE_dw = neuron.delta * prevLayer[weightIndex].activation;
                     neuron.weights[weightIndex] -= learningRate * dE_dw;
                 }
-                const double dE_db = neuron.delta;
+                const Scalar dE_db = neuron.delta;
                 neuron.bias -= learningRate * dE_db;
             }
         }
     }
 
-    double loss(const std::vector<double> &output, const std::vector<double> &targets) {
-        double total = 0.0;
+    Scalar loss(const Tensor &output, const Tensor &targets) {
+        if (output.size() != targets.size()) {
+            throw std::invalid_argument("output and target sizes differ");
+        }
+
+        Scalar total = 0.0;
         for (std::size_t index = 0; index < output.size(); ++index) {
             total += MSE(output[index], targets[index]);
         }
         return total;
     }
 
-    double loss(const Layer &outputs, const std::vector<double> &targets) {
+    Scalar loss(const std::vector<Neuron> &outputs, const Tensor &targets) {
         if (outputs.size() != targets.size()) {
             throw std::invalid_argument("targets do not match output layer");
         }
 
-        double total = 0.0;
+        Scalar total = 0.0;
         for (std::size_t index = 0; index < outputs.size(); ++index) {
             total += MSE(outputs[index].activation, targets[index]);
         }
         return total;
     }
 
-    std::vector<double> &sigmoid(std::vector<double> &input) {
-        for (double &index: input) {
+    Tensor &sigmoid(Tensor &input) {
+        for (Scalar &index: input) {
             index = sigmoid(index);
         }
         return input;

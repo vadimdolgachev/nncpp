@@ -4,12 +4,12 @@
 #include <vector>
 
 int main() {
-    constexpr double learningRate = 0.001;
-    const std::vector targets = {1.0};
+    constexpr nncpp::Scalar learningRate = 0.001f;
+    const nncpp::Tensor targets = {1.0f};
 
-    nncpp::Network network = makeTestNetwork();
+    std::vector<std::vector<nncpp::Neuron>> network = makeTestNetwork();
     nncpp::forwardPass(network);
-    const double lossBefore = nncpp::loss(network.back(), targets);
+    const nncpp::Scalar lossBefore = nncpp::loss(network.back(), targets);
 
     nncpp::calculateDeltas(network, targets);
 
@@ -81,7 +81,7 @@ int main() {
     }
 
     nncpp::forwardPass(network);
-    const double lossAfter = nncpp::loss(network.back(), targets);
+    const nncpp::Scalar lossAfter = nncpp::loss(network.back(), targets);
     if (lossAfter >= lossBefore) {
         throw std::runtime_error("backpropagation did not reduce loss");
     }

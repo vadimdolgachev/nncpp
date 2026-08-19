@@ -6,13 +6,13 @@
 #include <vector>
 
 namespace {
-    double evaluateLoss(
+    nncpp::Scalar evaluateLoss(
         nncpp::DenseLayer& dense1,
         nncpp::Sigmoid& sigmoid1,
         nncpp::DenseLayer& dense2,
         nncpp::Sigmoid& sigmoid2,
-        const std::vector<double>& input,
-        const std::vector<double>& targets
+        const nncpp::Tensor& input,
+        const nncpp::Tensor& targets
     ) {
         const auto z1 = dense1.forward(input);
         const auto a1 = sigmoid1.forward(z1);
@@ -54,8 +54,18 @@ int main() {
     expectNear(mseGradient[0], 0.2, "MSE gradient 0");
     expectNear(mseGradient[1], -0.2, "MSE gradient 1");
 
-    const std::vector<double> input = {0.25, 0.5};
-    const std::vector<double> targets = {1.0};
+    const nncpp::Tensor input = {0.25f, 0.5f};
+    const nncpp::Tensor targets = {1.0f};
+    bool rejectedMismatchedLoss = false;
+    try {
+        static_cast<void>(nncpp::loss({0.2, 0.8}, {1.0}));
+    } catch (const std::invalid_argument&) {
+        rejectedMismatchedLoss = true;
+    }
+    if (!rejectedMismatchedLoss) {
+        throw std::runtime_error("loss accepted mismatched target size");
+    }
+
 
     nncpp::DenseLayer dense1(2, 2);
     dense1.setWeights({0.1, 0.2, -0.3, 0.4});
@@ -78,59 +88,59 @@ int main() {
     gradient = sigmoid1.backward(gradient);
     static_cast<void>(dense1.backward(gradient));
 
-    const std::vector<double> dense1Analytic =
+    const nncpp::Tensor dense1Analytic =
         dense1.getWeightGradients();
-    const std::vector<double> dense2Analytic =
+    const nncpp::Tensor dense2Analytic =
         dense2.getWeightGradients();
-    constexpr double epsilon = 1e-6;
+    constexpr nncpp::Scalar epsilon = 1e-3f;
 
-    std::vector<double> dense1Weights = dense1.getWeights();
+    nncpp::Tensor dense1Weights = dense1.getWeights();
     for (std::size_t index = 0; index < dense1Weights.size(); ++index) {
-        const double original = dense1Weights[index];
+        const nncpp::Scalar original = dense1Weights[index];
 
         dense1Weights[index] = original + epsilon;
         dense1.setWeights(dense1Weights);
-        const double lossPlus =
+        const nncpp::Scalar lossPlus =
             evaluateLoss(dense1, sigmoid1, dense2, sigmoid2, input, targets);
 
         dense1Weights[index] = original - epsilon;
         dense1.setWeights(dense1Weights);
-        const double lossMinus =
+        const nncpp::Scalar lossMinus =
             evaluateLoss(dense1, sigmoid1, dense2, sigmoid2, input, targets);
 
         dense1Weights[index] = original;
         dense1.setWeights(dense1Weights);
-        const double numerical = (lossPlus - lossMinus) / (2.0 * epsilon);
+        const nncpp::Scalar numerical = (lossPlus - lossMinus) / (2.0f * epsilon);
         expectNear(
             dense1Analytic[index],
             numerical,
             "dense1 chain gradient",
-            1e-8
+            2e-4
         );
     }
 
-    std::vector<double> dense2Weights = dense2.getWeights();
+    nncpp::Tensor dense2Weights = dense2.getWeights();
     for (std::size_t index = 0; index < dense2Weights.size(); ++index) {
-        const double original = dense2Weights[index];
+        const nncpp::Scalar original = dense2Weights[index];
 
         dense2Weights[index] = original + epsilon;
         dense2.setWeights(dense2Weights);
-        const double lossPlus =
+        const nncpp::Scalar lossPlus =
             evaluateLoss(dense1, sigmoid1, dense2, sigmoid2, input, targets);
 
         dense2Weights[index] = original - epsilon;
         dense2.setWeights(dense2Weights);
-        const double lossMinus =
+        const nncpp::Scalar lossMinus =
             evaluateLoss(dense1, sigmoid1, dense2, sigmoid2, input, targets);
 
         dense2Weights[index] = original;
         dense2.setWeights(dense2Weights);
-        const double numerical = (lossPlus - lossMinus) / (2.0 * epsilon);
+        const nncpp::Scalar numerical = (lossPlus - lossMinus) / (2.0f * epsilon);
         expectNear(
             dense2Analytic[index],
             numerical,
             "dense2 chain gradient",
-            1e-8
+            2e-4
         );
     }
 

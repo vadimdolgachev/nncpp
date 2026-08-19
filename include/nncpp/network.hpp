@@ -8,16 +8,34 @@
 #include <vector>
 
 namespace nncpp {
-    double sigmoid(double value);
+    using Scalar = float;
+    using Tensor = std::vector<Scalar>;
 
-    class DenseLayer final {
+    Scalar sigmoid(Scalar value);
+
+    class Layer {
+    public:
+        virtual ~Layer() = default;
+
+        virtual Tensor forward(const Tensor &input) = 0;
+
+        virtual Tensor backward(const Tensor &outputGradient) = 0;
+
+        virtual void applyGradient(Scalar) {
+        }
+
+        virtual void resetGradients() {
+        }
+    };
+
+    class DenseLayer final : public Layer {
     public:
         DenseLayer(const std::size_t inputSize_,
                    const std::size_t outputSize_)
             : weights(inputSize_ * outputSize_),
-              weightGradients(inputSize_ * outputSize_, 0.0),
-              biases(outputSize_, 0.0),
-              biasGradients(outputSize_, 0.0),
+              weightGradients(inputSize_ * outputSize_, 0),
+              biases(outputSize_, 0),
+              biasGradients(outputSize_, 0),
               inputSize(inputSize_),
               outputSize(outputSize_) {
             if (inputSize == 0 || outputSize == 0) {
@@ -27,15 +45,15 @@ namespace nncpp {
             initWeights();
         }
 
-        [[nodiscard]] std::vector<double> forward(const std::vector<double> &input) {
+        [[nodiscard]] Tensor forward(const Tensor &input) override {
             if (input.size() != inputSize) {
                 throw std::logic_error("input size does not match expected size");
             }
             lastInput = input;
-            std::vector output(outputSize, 0.0);
+            Tensor output(outputSize, 0);
             // z = W * x + b
             for (size_t outIndex = 0; outIndex < outputSize; ++outIndex) {
-                double z = biases[outIndex];
+                Scalar z = biases[outIndex];
                 for (size_t inIndex = 0; inIndex < inputSize; ++inIndex) {
                     const size_t wIndex = inIndex + inputSize * outIndex;
                     z += weights[wIndex] * input[inIndex];
@@ -54,7 +72,7 @@ namespace nncpp {
          * be called first so the input used to calculate dE/dW is cached.
          * Gradients accumulate until `resetGradients()` is called.
          */
-        [[nodiscard]] std::vector<double> backward(const std::vector<double> &outputGradient) {
+        [[nodiscard]] Tensor backward(const Tensor &outputGradient) override {
             if (outputGradient.size() != outputSize) {
                 throw std::logic_error("gradient size does not match output size");
             }
@@ -62,7 +80,7 @@ namespace nncpp {
                 throw std::logic_error("forward must be called before backward");
             }
 
-            std::vector inputGradient(inputSize, 0.0);
+            Tensor inputGradient(inputSize, 0);
 
             for (size_t outIndex = 0; outIndex < outputSize; ++outIndex) {
                 const auto grad = outputGradient[outIndex];
@@ -80,7 +98,7 @@ namespace nncpp {
          * Applies the accumulated gradients without clearing them.
          * Call resetGradients() explicitly before accumulating a new batch.
          */
-        void applyGradient(const double learningRate) {
+        void applyGradient(const Scalar learningRate) override {
             if (learningRate <= 0.0) {
                 throw std::invalid_argument("learning rate must be positive");
             }
@@ -92,35 +110,35 @@ namespace nncpp {
             }
         }
 
-        void resetGradients() {
-            std::ranges::fill(weightGradients, 0.0);
-            std::ranges::fill(biasGradients, 0.0);
+        void resetGradients() override {
+            std::ranges::fill(weightGradients, Scalar{0});
+            std::ranges::fill(biasGradients, Scalar{0});
         }
 
-        [[nodiscard]] const std::vector<double> &getWeights() const noexcept {
+        [[nodiscard]] const Tensor &getWeights() const noexcept {
             return weights;
         }
 
-        [[nodiscard]] const std::vector<double> &getWeightGradients() const noexcept {
+        [[nodiscard]] const Tensor &getWeightGradients() const noexcept {
             return weightGradients;
         }
 
-        [[nodiscard]] const std::vector<double> &getBiases() const noexcept {
+        [[nodiscard]] const Tensor &getBiases() const noexcept {
             return biases;
         }
 
-        [[nodiscard]] const std::vector<double> &getBiasGradients() const noexcept {
+        [[nodiscard]] const Tensor &getBiasGradients() const noexcept {
             return biasGradients;
         }
 
-        void setWeights(const std::vector<double> &values) {
+        void setWeights(const Tensor &values) {
             if (values.size() != weights.size()) {
                 throw std::invalid_argument("weights do not match layer dimensions");
             }
             weights = values;
         }
 
-        void setBiases(const std::vector<double> &values) {
+        void setBiases(const Tensor &values) {
             if (values.size() != biases.size()) {
                 throw std::invalid_argument("biases do not match layer dimensions");
             }
@@ -130,24 +148,23 @@ namespace nncpp {
     private:
         void initWeights() {
             // Xavier/Glorot initialization
-            const double fanSum = static_cast<double>(inputSize) + static_cast<double>(outputSize);
-            const double limit = std::sqrt(6.0 / fanSum);
-            static std::random_device rd{};
-            static std::mt19937 gen{rd()};
-            std::uniform_real_distribution dist(-limit, limit);
-            std::ranges::generate(weights, [&dist] { return dist(gen); });
+            const Scalar fanSum = static_cast<Scalar>(inputSize) + static_cast<Scalar>(outputSize);
+            const Scalar limit = std::sqrt(Scalar{6} / fanSum);
+            thread_local std::mt19937 generator{std::random_device{}()};
+            std::uniform_real_distribution<Scalar> distribution(-limit, limit);
+            std::ranges::generate(weights, [&distribution] { return distribution(generator); });
         }
 
-        std::vector<double> weights;
-        std::vector<double> weightGradients;
-        std::vector<double> biases;
-        std::vector<double> biasGradients;
+        Tensor weights;
+        Tensor weightGradients;
+        Tensor biases;
+        Tensor biasGradients;
         size_t inputSize;
         size_t outputSize;
-        std::vector<double> lastInput;
+        Tensor lastInput;
     };
 
-    class Sigmoid final {
+    class Sigmoid final : public Layer {
     public:
         explicit Sigmoid(const size_t inputSize) : output(inputSize) {
         }
@@ -156,7 +173,7 @@ namespace nncpp {
          * input: z
          * return: sigmoid(z)
          */
-        [[nodiscard]] std::vector<double> forward(const std::vector<double> &input) {
+        [[nodiscard]] Tensor forward(const Tensor &input) override {
             if (input.size() != output.size()) {
                 throw std::logic_error("input size does not match expected size");
             }
@@ -173,7 +190,7 @@ namespace nncpp {
          * input: outputGradient(dE/da)
          * return: dE/dz
          */
-        [[nodiscard]] std::vector<double> backward(const std::vector<double> &outputGradient) const {
+        [[nodiscard]] Tensor backward(const Tensor &outputGradient) override {
             if (!hasForwardResult) {
                 throw std::logic_error("forward must be called before backward");
             }
@@ -181,47 +198,44 @@ namespace nncpp {
                 throw std::logic_error("output size does not match expected size");
             }
             // dE/dz = dE/da * a(1 - a)
-            std::vector inputGradient(outputGradient.size(), 0.0);
+            Tensor inputGradient(outputGradient.size(), Scalar{0});
             for (size_t i = 0; i < outputGradient.size(); ++i) {
-                inputGradient[i] = outputGradient[i] * output[i] * (1.0 - output[i]);
+                inputGradient[i] = outputGradient[i] * output[i] * (Scalar{1} - output[i]);
             }
             return inputGradient;
         }
 
     private:
-        std::vector<double> output;
+        Tensor output;
         bool hasForwardResult = false;
     };
 
     struct Neuron final {
-        std::vector<double> weights;
-        double bias = 0.0;
-        double activation = 0.0;
-        double delta = 0.0;
+        Tensor weights;
+        Scalar bias = 0.0f;
+        Scalar activation = 0.0f;
+        Scalar delta = 0.0f;
     };
 
-    using Layer = std::vector<Neuron>;
-    using Network = std::vector<Layer>;
+    Scalar derivativeSigmoid(Scalar activation);
 
-    double derivativeSigmoid(double activation);
+    Scalar MSE(Scalar output, Scalar target);
 
-    double MSE(double output, double target);
+    Tensor MSE(const Tensor &output, const Tensor &target);
 
-    std::vector<double> MSE(const std::vector<double> &output, const std::vector<double> &target);
+    Tensor derivativeMSE(const Tensor &output, const Tensor &target);
 
-    std::vector<double> derivativeMSE(const std::vector<double> &output, const std::vector<double> &target);
+    Scalar outputDelta(Scalar output, Scalar target);
 
-    double outputDelta(double output, double target);
+    void forwardPass(std::vector<std::vector<Neuron> > &network);
 
-    void forwardPass(Network &network);
+    void calculateDeltas(std::vector<std::vector<Neuron> > &network, const Tensor &targets);
 
-    void calculateDeltas(Network &network, const std::vector<double> &targets);
+    void optimizeParams(std::vector<std::vector<Neuron> > &network, Scalar learningRate);
 
-    void optimizeParams(Network &network, double learningRate);
+    Scalar loss(const Tensor &output, const Tensor &targets);
 
-    double loss(const std::vector<double> &output, const std::vector<double> &targets);
+    Scalar loss(const std::vector<Neuron> &outputs, const Tensor &targets);
 
-    double loss(const Layer &outputs, const std::vector<double> &targets);
-
-    std::vector<double> &sigmoid(std::vector<double> &input);
+    Tensor &sigmoid(Tensor &input);
 }
