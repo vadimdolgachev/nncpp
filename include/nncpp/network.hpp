@@ -7,6 +7,7 @@
 #include <random>
 #include <stdexcept>
 #include <vector>
+#include <execution>
 
 namespace nncpp {
     using Scalar = float;
@@ -97,6 +98,7 @@ namespace nncpp {
 
         /**
          * Applies the accumulated gradients without clearing them.
+         *
          * Call resetGradients() explicitly before accumulating a new batch.
          */
         void applyGradient(const Scalar learningRate) override {
@@ -149,10 +151,10 @@ namespace nncpp {
     private:
         void initWeights() {
             // Xavier/Glorot initialization
-            const Scalar fanSum = static_cast<Scalar>(inputSize) + static_cast<Scalar>(outputSize);
-            const Scalar limit = std::sqrt(Scalar{6} / fanSum);
+            const auto fanSum = static_cast<Scalar>(inputSize) + static_cast<Scalar>(outputSize);
+            const auto limit = std::sqrt(6.0f / fanSum);
             thread_local std::mt19937 generator{std::random_device{}()};
-            std::uniform_real_distribution<Scalar> distribution(-limit, limit);
+            std::uniform_real_distribution distribution(-limit, limit);
             std::ranges::generate(weights, [&distribution] { return distribution(generator); });
         }
 
@@ -199,16 +201,125 @@ namespace nncpp {
                 throw std::logic_error("output size does not match expected size");
             }
             // dE/dz = dE/da * a(1 - a)
-            Tensor inputGradient(outputGradient.size(), Scalar{0});
+            Tensor inputGradient(outputGradient.size(), 0);
             for (size_t i = 0; i < outputGradient.size(); ++i) {
-                inputGradient[i] = outputGradient[i] * output[i] * (Scalar{1} - output[i]);
+                inputGradient[i] = outputGradient[i] * output[i] * (1.0f - output[i]);
             }
+            hasForwardResult = false;
             return inputGradient;
         }
 
     private:
         Tensor output;
         bool hasForwardResult = false;
+    };
+
+    class ReLU final : public Layer {
+    public:
+        explicit ReLU(const size_t inputSize) : output(inputSize) {
+        }
+
+        /*
+        * input: z
+        * return: ReLU(z)
+        */
+        Tensor forward(const Tensor &input) override {
+            if (input.size() != output.size()) {
+                throw std::logic_error("input size does not match expected size");
+            }
+            for (size_t i = 0; i < input.size(); ++i) {
+                output[i] = std::max(input[i], 0.0f);
+            }
+            hasForwardResult = true;
+            return output;
+        }
+
+        /*
+         * input: outputGradient(dE/da)
+         * return: dE/dz
+         */
+        [[nodiscard]] Tensor backward(const Tensor &outputGradient) override {
+            if (!hasForwardResult) {
+                throw std::logic_error("forward must be called before backward");
+            }
+            if (outputGradient.size() != output.size()) {
+                throw std::logic_error("output size does not match expected size");
+            }
+            // dE/dz = dE/da * ReLU'
+            Tensor inputGradient(outputGradient.size(), 0);
+            for (size_t i = 0; i < outputGradient.size(); ++i) {
+                inputGradient[i] = output[i] > 0.0f ? outputGradient[i] : 0.0f;
+            }
+            hasForwardResult = false;
+            return inputGradient;
+        }
+
+    private:
+        Tensor output;
+        bool hasForwardResult = false;
+    };
+
+    class Loss {
+    public:
+        virtual ~Loss() = default;
+
+        virtual Scalar forward(const Tensor &input, const Tensor &target) = 0;
+        virtual const Tensor &backward() = 0;
+    };
+
+    class SoftmaxCategorialCrossEntropy final : public Loss {
+    public:
+        explicit SoftmaxCategorialCrossEntropy(const size_t classesSize) :
+            probabilities(classesSize),
+            inputGradient(classesSize) {
+        }
+
+        [[nodiscard]] Scalar forward(const Tensor &logits, const Tensor &target) {
+            if (logits.size() != probabilities.size()) {
+                throw std::logic_error("input size does not match expected size");
+            }
+
+            const auto maxElem = *std::ranges::max_element(logits);
+            Scalar sumExp = 0.0;
+            for (size_t i = 0; i < logits.size(); ++i) {
+                probabilities[i] = std::exp(logits[i] - maxElem);
+                sumExp += probabilities[i];
+            }
+            std::ranges::transform(probabilities, probabilities.begin(), [sumExp](auto o) {
+                return o / sumExp;
+            });
+
+            hasForwardResult = true;
+            savedTargets = target;
+
+            Scalar totalLoss = 0.0;
+            constexpr Scalar eps = 1e-7f;
+            for (size_t i = 0; i < probabilities.size(); ++i) {
+                totalLoss -= target[i] * std::log(std::max(eps, probabilities[i]));
+            }
+
+            return totalLoss;
+        }
+
+        [[nodiscard]] const Tensor &backward() {
+            if (!hasForwardResult) {
+                throw std::logic_error("forward must be called before backward");
+            }
+            std::transform(/*std::execution::par_unseq, */
+                           probabilities.begin(),
+                           probabilities.end(),
+                           savedTargets.begin(),
+                           inputGradient.begin(),
+                           [](auto p, auto t) { return p - t; });
+            hasForwardResult = false;
+            return inputGradient;
+        }
+
+    private:
+        bool hasForwardResult = false;
+        Tensor probabilities;
+        Tensor savedTargets;
+        Tensor inputGradient;
     };
 
     struct Neuron final {

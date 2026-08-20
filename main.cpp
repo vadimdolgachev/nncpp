@@ -72,7 +72,7 @@ namespace {
         const nncpp::Tensor targets = {1.0};
 
         std::array<std::unique_ptr<nncpp::Layer>, 4> network = {
-           std::make_unique<nncpp::DenseLayer>(2, 4),
+            std::make_unique<nncpp::DenseLayer>(2, 4),
             std::make_unique<nncpp::Sigmoid>(4),
             std::make_unique<nncpp::DenseLayer>(4, 1),
             std::make_unique<nncpp::Sigmoid>(1),
@@ -95,8 +95,8 @@ namespace {
 
             auto gradient = nncpp::derivativeMSE(out, targets);
 
-            for (const auto &it : std::views::reverse(network)) {
-                gradient = it->backward(gradient);
+            for (const auto &layer: std::views::reverse(network)) {
+                gradient = layer->backward(gradient);
             }
 
             for (const auto &layer: network) {
@@ -108,7 +108,7 @@ namespace {
         for (const auto &layer: network) {
             out = layer->forward(out);
         }
-        const nncpp::Scalar finalError = nncpp::loss(out, targets);
+        const auto finalError = nncpp::loss(out, targets);
         std::cout << "iterations: " << iterations << '\n';
         std::cout << "output: " << out[0] << '\n';
         std::cout << "error: " << finalError << '\n';

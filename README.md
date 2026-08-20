@@ -94,14 +94,12 @@ This corresponds directly to `DenseLayer::forward()`:
 ```cpp
 for (size_t outIndex = 0; outIndex < outputSize; ++outIndex) {
     nncpp::Scalar z = biases[outIndex];
-
+    
     for (size_t inIndex = 0; inIndex < inputSize; ++inIndex) {
-        const size_t wIndex =
-            inIndex + inputSize * outIndex;
-
+        const size_t wIndex = inIndex + inputSize * outIndex;
         z += weights[wIndex] * input[inIndex];
     }
-
+    
     output[outIndex] = z;
 }
 ```
@@ -192,7 +190,7 @@ In code, the generic `Layer` interface allows the forward pass to simply iterate
 ```cpp
 nncpp::Tensor out = input;
 
-for (const auto& layer : network) {
+for (const auto &layer : network) {
     out = layer->forward(out);
 }
 ```
@@ -263,7 +261,7 @@ input:   dE / d(layer output)
 output:  dE / d(layer input)
 ```
 
-Therefore the entire backward pass can be expressed as:
+Therefore, the entire backward pass can be expressed as:
 
 ```cpp
 for (const auto& layer : std::views::reverse(network)) {
@@ -307,10 +305,7 @@ $$
 This is implemented directly by `Sigmoid::backward()`:
 
 ```cpp
-inputGradient[i] =
-    outputGradient[i]
-    * output[i]
-    * (1 - output[i]);
+inputGradient[i] = outputGradient[i] * output[i] * (1.0f - output[i]);
 ```
 
 The sigmoid output from the forward pass is cached because it is required during backward propagation.
@@ -358,8 +353,7 @@ $$
 In the implementation:
 
 ```cpp
-weightGradients[wIndex] +=
-    lastInput[inIndex] * grad;
+weightGradients[wIndex] += lastInput[inIndex] * grad;
 ```
 
 #### Bias Gradient
@@ -419,8 +413,7 @@ $$
 Implemented as:
 
 ```cpp
-inputGradient[inIndex] +=
-    weights[wIndex] * grad;
+inputGradient[inIndex] += weights[wIndex] * grad;
 ```
 
 `DenseLayer::backward()` returns this `inputGradient`, allowing backpropagation to continue through the preceding layer.
