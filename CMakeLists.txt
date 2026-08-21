@@ -5,6 +5,11 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+find_package(MNIST REQUIRED CONFIG
+    PATHS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/mnist"
+    NO_DEFAULT_PATH
+)
+
 set(SANITIZER "" CACHE STRING "Optional sanitizer: address or thread")
 set_property(CACHE SANITIZER PROPERTY STRINGS "" address thread)
 
@@ -40,6 +45,8 @@ configure_nncpp_compile(nncpp_core)
 
 add_executable(nncpp main.cpp)
 target_link_libraries(nncpp PRIVATE nncpp_core)
+target_include_directories(nncpp PRIVATE src ${MNIST_INCLUDE_DIR})
+target_compile_definitions(nncpp PRIVATE MNIST_DATA_LOCATION="${MNIST_DATA_DIR}")
 configure_nncpp_executable(nncpp)
 
 include(CTest)
@@ -63,4 +70,15 @@ if(BUILD_TESTING)
     target_link_libraries(layer_chain_test PRIVATE nncpp_core)
     configure_nncpp_executable(layer_chain_test)
     add_test(NAME layer_chain COMMAND layer_chain_test)
+
+    add_executable(activation_loss_test tests/activation_loss_test.cpp)
+    target_link_libraries(activation_loss_test PRIVATE nncpp_core)
+    configure_nncpp_executable(activation_loss_test)
+    add_test(NAME activation_loss COMMAND activation_loss_test)
+
+    add_executable(mnist_training_test tests/mnist_training_test.cpp)
+    target_link_libraries(mnist_training_test PRIVATE nncpp_core)
+    target_include_directories(mnist_training_test PRIVATE src)
+    configure_nncpp_executable(mnist_training_test)
+    add_test(NAME mnist_training COMMAND mnist_training_test)
 endif()

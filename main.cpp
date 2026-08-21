@@ -1,8 +1,12 @@
 #include "nncpp/network.hpp"
+#include "mnist_training.hpp"
+#include "mnist/mnist_reader.hpp"
 
 #include <array>
+#include <format>
 #include <iostream>
 #include <memory>
+#include <random>
 #include <ranges>
 #include <stdexcept>
 #include <vector>
@@ -117,10 +121,91 @@ namespace {
             throw std::runtime_error("training did not converge");
         }
     }
+
+    void MNISTTrainingExample() {
+        constexpr size_t maxEpochs = 50;
+        constexpr size_t batchSize = 32;
+        constexpr std::uint32_t shuffleSeed = 42;
+
+        const auto dataset = mnist::read_dataset<std::vector, std::vector, uint8_t, uint8_t>(MNIST_DATA_LOCATION);
+        nncpp::detail::mnist::validateDataset(dataset);
+
+        constexpr size_t hiddenLayerSize = 128;
+        std::array<std::unique_ptr<nncpp::Layer>, 3> network = {
+            std::make_unique<nncpp::DenseLayer>(nncpp::detail::mnist::imageSize, hiddenLayerSize),
+            std::make_unique<nncpp::ReLU>(hiddenLayerSize),
+            std::make_unique<nncpp::DenseLayer>(hiddenLayerSize, nncpp::detail::mnist::classCount)
+        };
+
+        nncpp::SoftmaxCategoricalCrossEntropy loss(nncpp::detail::mnist::classCount);
+
+        const size_t trainingSize = dataset.training_images.size();
+        nncpp::Tensor input(nncpp::detail::mnist::imageSize);
+        nncpp::Tensor target(nncpp::detail::mnist::classCount);
+        std::mt19937 batchShuffleGenerator{shuffleSeed};
+
+        for (size_t epoch = 0; epoch < maxEpochs; ++epoch) {
+            double epochLoss = 0.0;
+            const auto trainingIndices = nncpp::detail::mnist::makeShuffledIndices(trainingSize, batchShuffleGenerator);
+
+            for (size_t batchBegin = 0; batchBegin < trainingSize; batchBegin += batchSize) {
+                const size_t actualBatchSize = std::min(batchSize, trainingSize - batchBegin);
+
+                // Start accumulating gradients for a new batch.
+                for (const auto &layer: network) {
+                    layer->resetGradients();
+                }
+
+                for (size_t n = 0; n < actualBatchSize; ++n) {
+                    const auto index = trainingIndices[batchBegin + n];
+                    nncpp::detail::mnist::normalizeImage(dataset.training_images[index], input);
+
+                    const size_t label = dataset.training_labels[index];
+                    std::ranges::fill(target, nncpp::Scalar{0});
+                    target[label] = nncpp::Scalar{1};
+
+                    // Forward
+                    nncpp::Tensor out = input;
+                    for (const auto &layer: network) {
+                        out = layer->forward(out);
+                    }
+
+                    // Loss
+                    epochLoss += loss.forward(out, target);
+
+                    // dE / d(logits)
+                    auto gradient = loss.backward();
+
+                    // Backward
+                    for (const auto &layer: std::views::reverse(network)) {
+                        gradient = layer->backward(gradient);
+                    }
+                }
+
+                // Convert accumulated gradients over actualBatchSize to average gradient
+                const auto batchScale = 1.0f / static_cast<nncpp::Scalar>(actualBatchSize);
+                for (const auto &layer: network) {
+                    layer->applyGradient(learningRate * batchScale);
+                }
+            }
+
+            epochLoss /= static_cast<double>(trainingSize);
+            const auto [averageLoss, accuracy] =
+                nncpp::detail::mnist::evaluateClassification(network, dataset.test_images, dataset.test_labels);
+            std::cout << std::format(
+                "epoch: {}, train loss: {:.5f}, test loss: {:.5f}, test accuracy: {:.5f}%",
+                epoch,
+                epochLoss,
+                averageLoss,
+                accuracy * 100
+            ) << '\n';
+        }
+    }
 }
 
 int main() {
     simpleNetworkExample();
     newNetworkExample();
+    MNISTTrainingExample();
     return 0;
 }

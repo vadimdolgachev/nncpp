@@ -3,11 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
-#include <iostream>
 #include <random>
 #include <stdexcept>
 #include <vector>
-#include <execution>
 
 namespace nncpp {
     using Scalar = float;
@@ -23,7 +21,7 @@ namespace nncpp {
 
         virtual Tensor backward(const Tensor &outputGradient) = 0;
 
-        virtual void applyGradient(Scalar) {
+        virtual void applyGradient([[maybe_unused]] Scalar learningRate) {
         }
 
         virtual void resetGradients() {
@@ -52,6 +50,7 @@ namespace nncpp {
                 throw std::logic_error("input size does not match expected size");
             }
             lastInput = input;
+            hasForwardResult = true;
             Tensor output(outputSize, 0);
             // z = W * x + b
             for (size_t outIndex = 0; outIndex < outputSize; ++outIndex) {
@@ -75,6 +74,9 @@ namespace nncpp {
          * Gradients accumulate until `resetGradients()` is called.
          */
         [[nodiscard]] Tensor backward(const Tensor &outputGradient) override {
+            if (!hasForwardResult) {
+                throw std::logic_error("forward must be called before backward");
+            }
             if (outputGradient.size() != outputSize) {
                 throw std::logic_error("gradient size does not match output size");
             }
@@ -93,6 +95,7 @@ namespace nncpp {
                     inputGradient[inIndex] += weights[wIndex] * grad;
                 }
             }
+            hasForwardResult = false;
             return inputGradient;
         }
 
@@ -165,6 +168,7 @@ namespace nncpp {
         size_t inputSize;
         size_t outputSize;
         Tensor lastInput;
+        bool hasForwardResult = false;
     };
 
     class Sigmoid final : public Layer {
@@ -217,13 +221,16 @@ namespace nncpp {
     class ReLU final : public Layer {
     public:
         explicit ReLU(const size_t inputSize) : output(inputSize) {
+            if (inputSize == 0) {
+                throw std::invalid_argument("ReLU size must be positive");
+            }
         }
 
         /*
         * input: z
         * return: ReLU(z)
         */
-        Tensor forward(const Tensor &input) override {
+        [[nodiscard]] Tensor forward(const Tensor &input) override {
             if (input.size() != output.size()) {
                 throw std::logic_error("input size does not match expected size");
             }
@@ -267,41 +274,60 @@ namespace nncpp {
         virtual const Tensor &backward() = 0;
     };
 
-    class SoftmaxCategorialCrossEntropy final : public Loss {
+    class SoftmaxCategoricalCrossEntropy final : public Loss {
     public:
-        explicit SoftmaxCategorialCrossEntropy(const size_t classesSize) :
+        explicit SoftmaxCategoricalCrossEntropy(const size_t classesSize) :
             probabilities(classesSize),
             inputGradient(classesSize) {
+            if (classesSize == 0) {
+                throw std::invalid_argument("class count must be positive");
+            }
         }
 
-        [[nodiscard]] Scalar forward(const Tensor &logits, const Tensor &target) {
+        [[nodiscard]] Scalar forward(const Tensor &logits, const Tensor &target) override {
             if (logits.size() != probabilities.size()) {
-                throw std::logic_error("input size does not match expected size");
+                throw std::invalid_argument("logit size does not match class count");
+            }
+            if (target.size() != probabilities.size()) {
+                throw std::invalid_argument("target size does not match class count");
             }
 
             const auto maxElem = *std::ranges::max_element(logits);
+            if (!std::isfinite(maxElem)) {
+                throw std::invalid_argument("logits must be finite");
+            }
+
             Scalar sumExp = 0.0;
+            Scalar targetSum = 0.0;
+            Scalar targetDotShiftedLogits = 0;
             for (size_t i = 0; i < logits.size(); ++i) {
+                if (!std::isfinite(logits[i])) {
+                    throw std::invalid_argument("logits must be finite");
+                }
+                if (!std::isfinite(target[i]) || target[i] < 0.0f) {
+                    throw std::invalid_argument("targets must be finite and nonnegative");
+                }
                 probabilities[i] = std::exp(logits[i] - maxElem);
                 sumExp += probabilities[i];
+                targetSum += target[i];
+                targetDotShiftedLogits += target[i] * (logits[i] - maxElem);
             }
-            std::ranges::transform(probabilities, probabilities.begin(), [sumExp](auto o) {
-                return o / sumExp;
+            if (constexpr Scalar targetTolerance = 1e-5f; std::abs(targetSum - 1.0f) > targetTolerance) {
+                throw std::invalid_argument("targets must sum to one");
+            }
+
+            std::ranges::transform(probabilities, probabilities.begin(), [sumExp](auto p) {
+                return p / sumExp;
             });
 
             hasForwardResult = true;
             savedTargets = target;
+            savedTargetSum = targetSum;
 
-            Scalar totalLoss = 0.0;
-            constexpr Scalar eps = 1e-7f;
-            for (size_t i = 0; i < probabilities.size(); ++i) {
-                totalLoss -= target[i] * std::log(std::max(eps, probabilities[i]));
-            }
-
-            return totalLoss;
+            return targetSum * std::log(sumExp) - targetDotShiftedLogits;
         }
 
-        [[nodiscard]] const Tensor &backward() {
+        [[nodiscard]] const Tensor &backward() override {
             if (!hasForwardResult) {
                 throw std::logic_error("forward must be called before backward");
             }
@@ -310,7 +336,9 @@ namespace nncpp {
                            probabilities.end(),
                            savedTargets.begin(),
                            inputGradient.begin(),
-                           [](auto p, auto t) { return p - t; });
+                           [this](const auto p, const auto t) {
+                               return p * savedTargetSum - t;
+                           });
             hasForwardResult = false;
             return inputGradient;
         }
@@ -320,6 +348,12 @@ namespace nncpp {
         Tensor probabilities;
         Tensor savedTargets;
         Tensor inputGradient;
+        Scalar savedTargetSum = 0.0f;
+    };
+
+    struct ClassificationMetrics final {
+        double averageLoss;
+        double accuracy;
     };
 
     struct Neuron final {

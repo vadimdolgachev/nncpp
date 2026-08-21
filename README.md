@@ -5,12 +5,14 @@ A minimal neural network implementation in modern C++ designed primarily to demo
 The current implementation provides:
 
 * fully connected (`DenseLayer`) layers;
-* sigmoid activation (`Sigmoid`);
+* sigmoid and ReLU activations (`Sigmoid`, `ReLU`);
 * summed half-squared-error loss (exposed through the `MSE` API);
+* fused softmax and categorical cross-entropy for classification;
 * gradient accumulation;
-* basic gradient descent;
+* mini-batch gradient descent;
 * Xavier/Glorot weight initialization;
-* a generic `Layer` interface for composing networks.
+* a generic `Layer` interface for composing networks;
+* a deterministic MNIST training example with test-set evaluation.
 
 The implementation intentionally uses simple `std::vector<float>` tensors instead of a matrix library so that the code closely follows the underlying equations.
 
@@ -24,6 +26,11 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ./build/nncpp
 ```
+
+The executable runs two small backpropagation demonstrations followed by the
+50-epoch MNIST example. The repository includes the MNIST files under
+`third_party/mnist/`; malformed or incomplete training and test splits are
+rejected before training starts.
 
 To run the same tests with AddressSanitizer enabled:
 
@@ -195,7 +202,21 @@ for (const auto &layer : network) {
 }
 ```
 
-## Loss Function
+### ReLU Activation
+
+ReLU is used by the MNIST hidden layer and is applied element-wise:
+
+$$
+\operatorname{ReLU}(z)=\max(0,z)
+$$
+
+Its backward pass forwards the incoming gradient where the cached activation
+is positive and returns zero elsewhere. As with `Sigmoid`, call `forward()`
+before each `backward()` call.
+
+## Loss Functions
+
+### Summed Half-Squared Error
 
 The current implementation uses summed half-squared error. The public functions retain the `MSE` name, but the result is not divided by the number of outputs and therefore is not a statistical mean.
 
@@ -235,6 +256,31 @@ $$
 $$
 
 where $a_L$ is the final network output.
+
+### Softmax Categorical Cross-Entropy
+
+For multi-class classification, `SoftmaxCategoricalCrossEntropy` accepts raw
+logits and a target distribution whose values are nonnegative and sum to one.
+It combines numerically stable softmax and cross-entropy in one operation:
+
+$$
+E=-\sum_i y_i\log p_i,
+\qquad
+p_i=\frac{e^{z_i}}{\sum_j e^{z_j}}
+$$
+
+The backward result is the gradient with respect to the logits. For a one-hot
+target this simplifies to:
+
+$$
+\boxed{\frac{\partial E}{\partial z_i}=p_i-y_i}
+$$
+
+```cpp
+nncpp::SoftmaxCategoricalCrossEntropy loss(10);
+const nncpp::Scalar sampleLoss = loss.forward(logits, target);
+auto gradient = loss.backward();
+```
 
 ## Backpropagation
 
@@ -594,6 +640,24 @@ parameter gradients
   ▼
 updated parameters
 ```
+
+## MNIST Training Example
+
+`MNISTTrainingExample()` builds a `784 → 128 → 10` classifier using a ReLU
+hidden layer and fused softmax cross-entropy loss. Each epoch shuffles training
+indices with a reproducible `std::mt19937` sequence seeded with `42`. Input and
+one-hot target buffers are reused, while dense-layer gradients accumulate over
+32 samples and are scaled to the batch mean before the parameter update.
+
+After every epoch, the example reports average online training loss and
+fixed-test-set loss and accuracy:
+
+```text
+epoch: 0, train loss: 0.41234, test loss: 0.21567, test accuracy: 93.45000%
+```
+
+Evaluation performs forward passes only and does not update parameters or
+accumulated gradients.
 
 ## Weight Initialization
 
