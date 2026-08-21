@@ -21,7 +21,7 @@ namespace nncpp {
 
         virtual Tensor backward(const Tensor &outputGradient) = 0;
 
-        virtual void applyGradient([[maybe_unused]] Scalar learningRate) {
+        virtual void applyGradient([[maybe_unused]] Scalar learningRate, [[maybe_unused]] size_t actualBatchSize) {
         }
 
         virtual void resetGradients() {
@@ -100,19 +100,26 @@ namespace nncpp {
         }
 
         /**
-         * Applies the accumulated gradients without clearing them.
+         * Applies the average of the accumulated gradients.
          *
-         * Call resetGradients() explicitly before accumulating a new batch.
+         * `batchSize` must equal the number of samples whose gradients
+         * have been accumulated since the last resetGradients().
+         *
+         * Gradients are not cleared by this function.
          */
-        void applyGradient(const Scalar learningRate) override {
+        void applyGradient(const Scalar learningRate, const size_t batchSize) override {
             if (learningRate <= 0.0) {
                 throw std::invalid_argument("learning rate must be positive");
             }
+            if (batchSize == 0) {
+                throw std::invalid_argument("batch size must be positive");
+            }
+            const auto scale = learningRate / static_cast<Scalar>(batchSize);
             for (size_t i = 0; i < weights.size(); ++i) {
-                weights[i] -= learningRate * weightGradients[i];
+                weights[i] -= scale * weightGradients[i];
             }
             for (size_t i = 0; i < biases.size(); ++i) {
-                biases[i] -= learningRate * biasGradients[i];
+                biases[i] -= scale * biasGradients[i];
             }
         }
 
@@ -271,6 +278,7 @@ namespace nncpp {
         virtual ~Loss() = default;
 
         virtual Scalar forward(const Tensor &input, const Tensor &target) = 0;
+
         virtual const Tensor &backward() = 0;
     };
 
@@ -331,14 +339,8 @@ namespace nncpp {
             if (!hasForwardResult) {
                 throw std::logic_error("forward must be called before backward");
             }
-            std::transform(/*std::execution::par_unseq, */
-                           probabilities.begin(),
-                           probabilities.end(),
-                           savedTargets.begin(),
-                           inputGradient.begin(),
-                           [this](const auto p, const auto t) {
-                               return p * savedTargetSum - t;
-                           });
+            std::ranges::transform(probabilities, savedTargets, inputGradient.begin(),
+                                   [](const auto p, const auto t) { return p - t; });
             hasForwardResult = false;
             return inputGradient;
         }

@@ -116,7 +116,7 @@ int main() {
 
     bool rejectedBadLearningRate = false;
     try {
-        layer.applyGradient(0.0);
+        layer.applyGradient(0.0, 1);
     } catch (const std::invalid_argument&) {
         rejectedBadLearningRate = true;
     }
@@ -127,7 +127,7 @@ int main() {
     const nncpp::Tensor weightsBefore = layer.getWeights();
     const nncpp::Tensor biasesBefore = layer.getBiases();
     constexpr nncpp::Scalar learningRate = 0.1f;
-    layer.applyGradient(learningRate);
+    layer.applyGradient(learningRate, 1);
 
     for (std::size_t index = 0; index < weightsBefore.size(); ++index) {
         expectNear(

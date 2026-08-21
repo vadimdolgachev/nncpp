@@ -3,6 +3,7 @@
 #include "mnist/mnist_reader.hpp"
 
 #include <array>
+#include <chrono>
 #include <format>
 #include <iostream>
 #include <memory>
@@ -104,7 +105,7 @@ namespace {
             }
 
             for (const auto &layer: network) {
-                layer->applyGradient(learningRate);
+                layer->applyGradient(learningRate, 1);
             }
         }
 
@@ -144,7 +145,10 @@ namespace {
         nncpp::Tensor target(nncpp::detail::mnist::classCount);
         std::mt19937 batchShuffleGenerator{shuffleSeed};
 
+        auto startTime = std::chrono::high_resolution_clock::now();
+
         for (size_t epoch = 0; epoch < maxEpochs; ++epoch) {
+            auto batchStartTime = std::chrono::high_resolution_clock::now();
             double epochLoss = 0.0;
             const auto trainingIndices = nncpp::detail::mnist::makeShuffledIndices(trainingSize, batchShuffleGenerator);
 
@@ -182,24 +186,27 @@ namespace {
                     }
                 }
 
-                // Convert accumulated gradients over actualBatchSize to average gradient
-                const auto batchScale = 1.0f / static_cast<nncpp::Scalar>(actualBatchSize);
                 for (const auto &layer: network) {
-                    layer->applyGradient(learningRate * batchScale);
+                    layer->applyGradient(learningRate, actualBatchSize);
                 }
             }
 
             epochLoss /= static_cast<double>(trainingSize);
             const auto [averageLoss, accuracy] =
                 nncpp::detail::mnist::evaluateClassification(network, dataset.test_images, dataset.test_labels);
+            const auto batchSpentTime = std::chrono::high_resolution_clock::now() - batchStartTime;
             std::cout << std::format(
-                "epoch: {}, train loss: {:.5f}, test loss: {:.5f}, test accuracy: {:.5f}%",
+                "epoch: {}/{}, spent: {}, train loss: {:.5f}, test loss: {:.5f}, test accuracy: {:.5f}%",
                 epoch,
+                maxEpochs,
+                std::chrono::duration_cast<std::chrono::milliseconds>(batchSpentTime),
                 epochLoss,
                 averageLoss,
                 accuracy * 100
             ) << '\n';
         }
+        const auto spentTime = std::chrono::high_resolution_clock::now() - startTime;
+        std::cout << std::format("Total time spent: {}", std::chrono::duration_cast<std::chrono::seconds>(spentTime));
     }
 }
 
