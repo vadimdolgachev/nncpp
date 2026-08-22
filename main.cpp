@@ -123,7 +123,7 @@ namespace {
         }
     }
 
-    void MNISTTrainingExample() {
+    void MNISTTrainingDenseExample() {
         constexpr size_t maxEpochs = 50;
         constexpr size_t batchSize = 32;
         constexpr std::uint32_t shuffleSeed = 42;
@@ -193,7 +193,94 @@ namespace {
 
             epochLoss /= static_cast<double>(trainingSize);
             const auto [averageLoss, accuracy] =
-                nncpp::detail::mnist::evaluateClassification(network, dataset.test_images, dataset.test_labels);
+                    nncpp::detail::mnist::evaluateClassification(network, dataset.test_images, dataset.test_labels);
+            const auto batchSpentTime = std::chrono::high_resolution_clock::now() - batchStartTime;
+            std::cout << std::format(
+                "epoch: {}/{}, spent: {}, train loss: {:.5f}, test loss: {:.5f}, test accuracy: {:.5f}%",
+                epoch,
+                maxEpochs,
+                std::chrono::duration_cast<std::chrono::milliseconds>(batchSpentTime),
+                epochLoss,
+                averageLoss,
+                accuracy * 100
+            ) << '\n';
+        }
+        const auto spentTime = std::chrono::high_resolution_clock::now() - startTime;
+        std::cout << std::format("Total time spent: {}", std::chrono::duration_cast<std::chrono::seconds>(spentTime));
+    }
+
+    void MNISTTrainingConv2dExample() {
+        constexpr size_t maxEpochs = 50;
+        constexpr size_t batchSize = 32;
+        constexpr std::uint32_t shuffleSeed = 42;
+
+        const auto dataset = mnist::read_dataset<std::vector, std::vector, uint8_t, uint8_t>(MNIST_DATA_LOCATION);
+        nncpp::detail::mnist::validateDataset(dataset);
+
+        auto convolution = std::make_unique<nncpp::Conv2d>(1, 8, 28, 28, 3, 1, nncpp::Conv2d::Padding::Valid);
+        const size_t hiddenLayerSize = convolution->getOutputSize();
+        std::array<std::unique_ptr<nncpp::Layer>, 3> network = {
+            std::move(convolution),
+            std::make_unique<nncpp::ReLU>(hiddenLayerSize),
+            std::make_unique<nncpp::DenseLayer>(hiddenLayerSize, nncpp::detail::mnist::classCount)
+        };
+
+        nncpp::SoftmaxCategoricalCrossEntropy loss(nncpp::detail::mnist::classCount);
+
+        const size_t trainingSize = dataset.training_images.size();
+        nncpp::Tensor input(nncpp::detail::mnist::imageSize);
+        nncpp::Tensor target(nncpp::detail::mnist::classCount);
+        std::mt19937 batchShuffleGenerator{shuffleSeed};
+
+        auto startTime = std::chrono::high_resolution_clock::now();
+
+        for (size_t epoch = 0; epoch < maxEpochs; ++epoch) {
+            auto batchStartTime = std::chrono::high_resolution_clock::now();
+            double epochLoss = 0.0;
+            const auto trainingIndices = nncpp::detail::mnist::makeShuffledIndices(trainingSize, batchShuffleGenerator);
+
+            for (size_t batchBegin = 0; batchBegin < trainingSize; batchBegin += batchSize) {
+                const size_t actualBatchSize = std::min(batchSize, trainingSize - batchBegin);
+
+                // Start accumulating gradients for a new batch.
+                for (const auto &layer: network) {
+                    layer->resetGradients();
+                }
+
+                for (size_t n = 0; n < actualBatchSize; ++n) {
+                    const auto index = trainingIndices[batchBegin + n];
+                    nncpp::detail::mnist::normalizeImage(dataset.training_images[index], input);
+
+                    const size_t label = dataset.training_labels[index];
+                    std::ranges::fill(target, nncpp::Scalar{0});
+                    target[label] = nncpp::Scalar{1};
+
+                    // Forward
+                    nncpp::Tensor out = input;
+                    for (const auto &layer: network) {
+                        out = layer->forward(out);
+                    }
+
+                    // Loss
+                    epochLoss += loss.forward(out, target);
+
+                    // dE / d(logits)
+                    auto gradient = loss.backward();
+
+                    // Backward
+                    for (const auto &layer: std::views::reverse(network)) {
+                        gradient = layer->backward(gradient);
+                    }
+                }
+
+                for (const auto &layer: network) {
+                    layer->applyGradient(learningRate, actualBatchSize);
+                }
+            }
+
+            epochLoss /= static_cast<double>(trainingSize);
+            const auto [averageLoss, accuracy] =
+                    nncpp::detail::mnist::evaluateClassification(network, dataset.test_images, dataset.test_labels);
             const auto batchSpentTime = std::chrono::high_resolution_clock::now() - batchStartTime;
             std::cout << std::format(
                 "epoch: {}/{}, spent: {}, train loss: {:.5f}, test loss: {:.5f}, test accuracy: {:.5f}%",
@@ -211,8 +298,6 @@ namespace {
 }
 
 int main() {
-    simpleNetworkExample();
-    newNetworkExample();
-    MNISTTrainingExample();
+    MNISTTrainingConv2dExample();
     return 0;
 }

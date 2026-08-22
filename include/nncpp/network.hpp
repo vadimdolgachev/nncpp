@@ -1,8 +1,12 @@
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <random>
+#include <stdexcept>
 #include <vector>
+#include <ranges>
 
 namespace nncpp {
     using Scalar = float;
@@ -119,6 +123,211 @@ namespace nncpp {
     private:
         Tensor output;
         bool hasForwardResult = false;
+    };
+
+    class Conv2d final : public Layer {
+    public:
+        enum class Padding {
+            Valid,
+            Same,
+            Full
+        };
+
+        Conv2d(const size_t inputChannels_,
+               const size_t outputChannels_,
+               const size_t width_,
+               const size_t height_,
+               const size_t kernelSize_,
+               const size_t stride_,
+               const Padding padding_) : inputChannels(inputChannels_),
+                                         outputChannels(outputChannels_),
+                                         width(width_),
+                                         height(height_),
+                                         kernelSize(kernelSize_),
+                                         stride(stride_),
+                                         padding(padding_) {
+            if (inputChannels == 0 || outputChannels == 0
+                || width == 0 || height == 0
+                || kernelSize == 0 || stride == 0) {
+                throw std::invalid_argument("invalid Conv2d dimensions");
+            }
+            paddingSize = calculatePadding();
+            outputWidth = (width + 2 * paddingSize - kernelSize) / stride + 1;
+            outputHeight = (height + 2 * paddingSize - kernelSize) / stride + 1;
+            const auto weightsSize = inputChannels * outputChannels * kernelSize * kernelSize;
+            weights.resize(weightsSize);
+            weightGradients.resize(weightsSize);
+            biases.resize(outputChannels);
+            biasGradients.resize(outputChannels);
+
+            initWeights();
+        }
+
+        Tensor forward(const Tensor &input) override {
+            if (input.size() != inputChannels * width * height) {
+                throw std::invalid_argument("Conv2d input size does not match output size");
+            }
+
+            if (const size_t expectedInputSize = inputChannels * width * height;
+                input.size() != expectedInputSize) {
+                throw std::logic_error("Conv2d input size does not match");
+            }
+            lastInput = input;
+
+            Tensor result(outputChannels * outputHeight * outputWidth);
+
+            for (size_t oc = 0; oc < outputChannels; ++oc) {
+                for (size_t oy = 0; oy < outputHeight; ++oy) {
+                    for (size_t ox = 0; ox < outputWidth; ++ox) {
+
+                        auto sum = biases[oc];
+
+                        for (size_t ic = 0; ic < inputChannels; ++ic) {
+                            for (size_t ky = 0; ky < kernelSize; ++ky) {
+                                for (size_t kx = 0; kx < kernelSize; ++kx) {
+                                    const auto iy =
+                                            static_cast<ssize_t>(oy * stride + ky) - static_cast<ssize_t>(padding);
+                                    const auto ix =
+                                            static_cast<ssize_t>(ox * stride + kx) - static_cast<ssize_t>(padding);
+
+                                    if (iy < 0 || ix < 0 || static_cast<size_t>(iy) >= height || static_cast<size_t>(ix)
+                                        >= width) {
+                                        continue;
+                                    }
+
+                                    const size_t inputIdx =
+                                            getInputIndex(ic, static_cast<size_t>(iy), static_cast<size_t>(ix));
+                                    const size_t weightIdx =
+                                            weightIndex(oc, ic, ky, kx);
+
+                                    sum += weights[weightIdx] * input[inputIdx];
+                                }
+                            }
+                        }
+
+                        result[getOutputIndex(oc, oy, ox)] = sum;
+                    }
+                }
+            }
+
+            output = result;
+            hasForwardResult = true;
+            return result;
+        }
+
+        Tensor backward(const Tensor &outputGradient) override {
+            if (!hasForwardResult) {
+                throw std::logic_error("forward must be called before backward");
+            }
+
+            if (const size_t expectedOutputSize = outputChannels * outputHeight * outputWidth;
+                outputGradient.size() != expectedOutputSize) {
+                throw std::logic_error("Conv2d gradient size does not match output");
+            }
+
+            Tensor inputGradient(inputChannels * height * width);
+
+            for (size_t oc = 0; oc < outputChannels; ++oc) {
+                for (size_t oy = 0; oy < outputHeight; ++oy) {
+                    for (size_t ox = 0; ox < outputWidth; ++ox) {
+
+                        const auto grad = outputGradient[getOutputIndex(oc, oy, ox)];
+                        biasGradients[oc] += grad;
+
+                        for (size_t ic = 0; ic < inputChannels; ++ic) {
+                            for (size_t ky = 0; ky < kernelSize; ++ky) {
+                                for (size_t kx = 0; kx < kernelSize; ++kx) {
+                                    const auto iy =
+                                            static_cast<ssize_t>(oy * stride + ky) - static_cast<ssize_t>(padding);
+                                    const auto ix =
+                                            static_cast<ssize_t>(ox * stride + kx) - static_cast<ssize_t>(padding);
+
+                                    if (iy < 0 || ix < 0 || static_cast<size_t>(iy) >= height || static_cast<size_t>(ix)
+                                        >= width) {
+                                        continue;
+                                    }
+
+                                    const size_t inputIdx =
+                                            getInputIndex(ic, static_cast<size_t>(iy), static_cast<size_t>(ix));
+
+                                    const size_t weightIdx = weightIndex(oc, ic, ky, kx);
+
+                                    weightGradients[weightIdx] += lastInput[inputIdx] * grad;
+                                    inputGradient[inputIdx] += weights[weightIdx] * grad;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            hasForwardResult = false;
+            return inputGradient;
+        }
+
+        [[nodiscard]] size_t getOutputSize() const noexcept {
+            return output.size();
+        }
+
+    private:
+        void initWeights() {
+            // Xavier/Glorot initialization
+            const auto fanSum = static_cast<Scalar>(inputChannels * width * height)
+                                + static_cast<Scalar>(outputWidth * outputHeight * outputChannels);
+            const auto limit = std::sqrt(6.0f / fanSum);
+            thread_local std::mt19937 generator{std::random_device{}()};
+            std::uniform_real_distribution distribution(-limit, limit);
+            std::ranges::generate(weights, [&distribution] { return distribution(generator); });
+        }
+
+        [[nodiscard]] size_t calculatePadding() const {
+            if (padding == Padding::Same && (kernelSize % 2 == 0 || stride != 1)) {
+                throw std::invalid_argument("Same padding currently requires odd kernel and stride 1");
+            }
+            switch (padding) {
+                case Padding::Valid:
+                    return 0;
+
+                case Padding::Same:
+                    return (kernelSize - 1) / 2;
+
+                case Padding::Full:
+                    return kernelSize - 1;
+            }
+
+            throw std::logic_error("invalid padding mode");
+        }
+
+        [[nodiscard]] size_t getOutputIndex(const size_t channel, const size_t x, const size_t y) const noexcept {
+            return channel * outputWidth * outputHeight + y * outputWidth + x;
+        }
+
+        [[nodiscard]] size_t getInputIndex(const size_t channel, const size_t x, const size_t y) const noexcept {
+            return channel * outputWidth * outputHeight + y * outputWidth + x;
+        }
+
+        [[nodiscard]] size_t weightIndex(const size_t outChannel, const size_t inChannel, const size_t ky,
+                                         const size_t kx) const noexcept {
+            return ((outChannel * inputChannels + inChannel) * kernelSize + ky) * kernelSize + kx;
+        }
+
+        size_t inputChannels;
+        size_t outputChannels;
+        size_t width;
+        size_t height;
+        size_t outputWidth;
+        size_t outputHeight;
+        size_t kernelSize;
+        size_t stride;
+        Padding padding;
+        size_t paddingSize;
+        bool hasForwardResult = false;
+        Tensor weights;
+        Tensor weightGradients;
+        Tensor biases;
+        Tensor biasGradients;
+        Tensor lastInput;
+        Tensor output;
     };
 
     class Loss {
