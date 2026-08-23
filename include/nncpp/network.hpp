@@ -128,8 +128,11 @@ namespace nncpp {
     class Conv2d final : public Layer {
     public:
         enum class Padding {
+            // Do not add zero padding.
             Valid,
+            // Preserve spatial dimensions for odd kernels and stride 1.
             Same,
+            // Pad every side by kernelSize - 1.
             Full
         };
 
@@ -417,7 +420,7 @@ namespace nncpp {
             if (channels == 0) {
                 throw std::invalid_argument("channels must be greater than zero");
             }
-            if (width <= 0 || height <= 0) {
+            if (width == 0 || height == 0) {
                 throw std::invalid_argument("width and height must be greater than zero");
             }
             if (kernelSize == 0) {
@@ -444,18 +447,16 @@ namespace nncpp {
             for (size_t c = 0; c < channels; c++) {
                 for (size_t oy = 0; oy < outputHeight; ++oy) {
                     for (size_t ox = 0; ox < outputWidth; ++ox) {
-                        auto maxValue = std::numeric_limits<Scalar>::lowest();
-                        size_t maxIndex = 0;
-
                         const size_t startY = oy * stride;
                         const size_t startX = ox * stride;
+                        size_t maxIndex = getInputIndex(c, startY, startX);
+                        auto maxValue = input[maxIndex];
 
                         for (size_t ky = 0; ky < kernelSize; ++ky) {
                             for (size_t kx = 0; kx < kernelSize; ++kx) {
                                 const size_t y = startY + ky;
                                 const size_t x = startX + kx;
-                                const size_t inputIndex = getInputIndex(c, y, x);
-                                if (input[inputIndex] > maxValue) {
+                                if (const size_t inputIndex = getInputIndex(c, y, x); input[inputIndex] > maxValue) {
                                     maxValue = input[inputIndex];
                                     maxIndex = inputIndex;
                                 }
@@ -467,7 +468,6 @@ namespace nncpp {
                         maxIndices[outputIndex] = maxIndex;
                     }
                 }
-
             }
             hasForwardResult = true;
             return output;

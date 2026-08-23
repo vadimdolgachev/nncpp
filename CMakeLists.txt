@@ -71,6 +71,11 @@ if(BUILD_TESTING)
     configure_nncpp_executable(conv2d_test)
     add_test(NAME conv2d COMMAND conv2d_test)
 
+    add_executable(max_pool2d_test tests/max_pool2d_test.cpp)
+    target_link_libraries(max_pool2d_test PRIVATE nncpp_core)
+    configure_nncpp_executable(max_pool2d_test)
+    add_test(NAME max_pool2d COMMAND max_pool2d_test)
+
     add_executable(layer_chain_test tests/layer_chain_test.cpp)
     target_link_libraries(layer_chain_test PRIVATE nncpp_core)
     configure_nncpp_executable(layer_chain_test)
