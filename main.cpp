@@ -217,12 +217,27 @@ namespace {
         const auto dataset = mnist::read_dataset<std::vector, std::vector, uint8_t, uint8_t>(MNIST_DATA_LOCATION);
         nncpp::detail::mnist::validateDataset(dataset);
 
-        auto convolution = std::make_unique<nncpp::Conv2d>(1, 8, 28, 28, 3, 1, nncpp::Conv2d::Padding::Valid);
-        const size_t hiddenLayerSize = convolution->getOutputSize();
-        std::array<std::unique_ptr<nncpp::Layer>, 3> network = {
+        constexpr size_t inputChannels = 1;
+        constexpr size_t outputChannels = 8;
+        constexpr size_t w = 28;
+        constexpr size_t h = 28;
+        constexpr size_t kernelSize = 3;
+        constexpr size_t stride = 1;
+        auto convolution = std::make_unique<nncpp::Conv2d>(inputChannels, outputChannels, w, h, kernelSize, stride, nncpp::Conv2d::Padding::Same);
+
+        const size_t convOutputSize = convolution->getOutputSize();
+        const size_t convOutputWidth = convolution->getOutputWidth();
+        const size_t convOutputHeight = convolution->getOutputHeight();
+
+        auto maxPool2d = std::make_unique<nncpp::MaxPool2d>(outputChannels, convOutputWidth, convOutputHeight, 2, 2);
+
+        const auto maxPool2dOutputSize = maxPool2d->getOutputSize();
+
+        std::array<std::unique_ptr<nncpp::Layer>, 4> network = {
             std::move(convolution),
-            std::make_unique<nncpp::ReLU>(hiddenLayerSize),
-            std::make_unique<nncpp::DenseLayer>(hiddenLayerSize, nncpp::detail::mnist::classCount)
+            std::make_unique<nncpp::ReLU>(convOutputSize),
+            std::move(maxPool2d),
+            std::make_unique<nncpp::DenseLayer>(maxPool2dOutputSize, nncpp::detail::mnist::classCount)
         };
 
         nncpp::SoftmaxCategoricalCrossEntropy loss(nncpp::detail::mnist::classCount);

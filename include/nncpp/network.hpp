@@ -172,6 +172,9 @@ namespace nncpp {
             initWeights();
         }
 
+        /*
+         * output data layout: Channel x Height x Width
+         */
         [[nodiscard]] Tensor forward(const Tensor &input) override {
             if (input.size() != inputChannels * width * height) {
                 throw std::logic_error("Conv2d input size does not match expected size");
@@ -181,7 +184,6 @@ namespace nncpp {
             for (size_t oc = 0; oc < outputChannels; ++oc) {
                 for (size_t oy = 0; oy < outputHeight; ++oy) {
                     for (size_t ox = 0; ox < outputWidth; ++ox) {
-
                         auto sum = biases[oc];
 
                         for (size_t ic = 0; ic < inputChannels; ++ic) {
@@ -232,7 +234,6 @@ namespace nncpp {
             for (size_t oc = 0; oc < outputChannels; ++oc) {
                 for (size_t oy = 0; oy < outputHeight; ++oy) {
                     for (size_t ox = 0; ox < outputWidth; ++ox) {
-
                         const auto grad = outputGradient[getOutputIndex(oc, oy, ox)];
                         biasGradients[oc] += grad;
 
@@ -373,7 +374,7 @@ namespace nncpp {
         [[nodiscard]] size_t getInputIndex(const size_t channel,
                                            const size_t y,
                                            const size_t x) const noexcept {
-            return channel * width * height  + y * width + x;
+            return channel * width * height + y * width + x;
         }
 
         [[nodiscard]] size_t getWeightIndex(const size_t outChannel,
@@ -400,6 +401,122 @@ namespace nncpp {
         Tensor biasGradients;
         Tensor lastInput;
         Tensor output;
+    };
+
+    class MaxPool2d final : public Layer {
+    public:
+        MaxPool2d(const size_t channels_,
+                  const size_t width_,
+                  const size_t height_,
+                  const size_t kernelSize_,
+                  const size_t stride_) : channels(channels_),
+                                          width(width_),
+                                          height(height_),
+                                          kernelSize(kernelSize_),
+                                          stride(stride_) {
+            if (channels == 0) {
+                throw std::invalid_argument("channels must be greater than zero");
+            }
+            if (width <= 0 || height <= 0) {
+                throw std::invalid_argument("width and height must be greater than zero");
+            }
+            if (kernelSize == 0) {
+                throw std::invalid_argument("kernel size must be greater than zero");
+            }
+            if (kernelSize > width ||
+                kernelSize > height) {
+                throw std::invalid_argument("kernel is larger than input");
+            }
+            if (stride == 0) {
+                throw std::invalid_argument("stride must be greater than zero");
+            }
+            outputWidth = (width - kernelSize) / stride + 1;
+            outputHeight = (height - kernelSize) / stride + 1;
+            output.resize(getOutputSize());
+            maxIndices.resize(getOutputSize());
+        }
+
+        [[nodiscard]] Tensor forward(const Tensor &input) override {
+            if (input.size() != channels * width * height) {
+                throw std::logic_error("MaxPool2d input size does not match");
+            }
+
+            for (size_t c = 0; c < channels; c++) {
+                for (size_t oy = 0; oy < outputHeight; ++oy) {
+                    for (size_t ox = 0; ox < outputWidth; ++ox) {
+                        auto maxValue = std::numeric_limits<Scalar>::lowest();
+                        size_t maxIndex = 0;
+
+                        const size_t startY = oy * stride;
+                        const size_t startX = ox * stride;
+
+                        for (size_t ky = 0; ky < kernelSize; ++ky) {
+                            for (size_t kx = 0; kx < kernelSize; ++kx) {
+                                const size_t y = startY + ky;
+                                const size_t x = startX + kx;
+                                const size_t inputIndex = getInputIndex(c, y, x);
+                                if (input[inputIndex] > maxValue) {
+                                    maxValue = input[inputIndex];
+                                    maxIndex = inputIndex;
+                                }
+                            }
+                        }
+
+                        const size_t outputIndex = getOutputIndex(c, oy, ox);
+                        output[outputIndex] = maxValue;
+                        maxIndices[outputIndex] = maxIndex;
+                    }
+                }
+
+            }
+            hasForwardResult = true;
+            return output;
+        }
+
+        [[nodiscard]] Tensor backward(const Tensor &outputGradient) override {
+            if (!hasForwardResult) {
+                throw std::logic_error("forward must be called before backward");
+            }
+            if (output.size() != outputGradient.size()) {
+                throw std::logic_error("MaxPool2d gradient size does not match");
+            }
+            Tensor inputGradient(channels * width * height );
+
+            for (size_t i = 0; i < outputGradient.size(); ++i) {
+                inputGradient[maxIndices[i]] += outputGradient[i];
+            }
+
+            hasForwardResult = false;
+            return inputGradient;
+        }
+
+        [[nodiscard]] size_t getOutputSize() const noexcept {
+            return outputWidth * outputHeight * channels;
+        }
+
+    private:
+        [[nodiscard]] size_t getOutputIndex(const size_t channel,
+                                            const size_t y,
+                                            const size_t x) const noexcept {
+            return channel * outputWidth * outputHeight + y * outputWidth + x;
+        }
+
+        [[nodiscard]] size_t getInputIndex(const size_t channel,
+                                           const size_t y,
+                                           const size_t x) const noexcept {
+            return channel * width * height + y * width + x;
+        }
+
+        size_t channels;
+        size_t outputWidth;
+        size_t outputHeight;
+        size_t width;
+        size_t height;
+        size_t kernelSize;
+        size_t stride;
+        Tensor output;
+        std::vector<size_t> maxIndices;
+        bool hasForwardResult = false;
     };
 
     class Loss {
