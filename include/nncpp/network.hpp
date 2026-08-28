@@ -25,7 +25,7 @@ namespace nncpp {
             }
 
             size_t index = 0;
-            for (const size_t dimension : dims) {
+            for (const size_t dimension: dims) {
                 dimensions[index++] = dimension;
                 if (dimension != 0 && total_ > std::numeric_limits<size_t>::max() / dimension) {
                     throw std::overflow_error("shape total size overflows size_t");
@@ -281,7 +281,8 @@ namespace nncpp {
 
         [[nodiscard]] size_t calculatePadding() const;
 
-        [[nodiscard]] size_t getWeightIndex(size_t inChannelSize, size_t outChannel, size_t inChannel, size_t ky, size_t kx) const noexcept;
+        [[nodiscard]] size_t getWeightIndex(size_t inChannelSize, size_t outChannel, size_t inChannel, size_t ky,
+                                            size_t kx) const noexcept;
 
         Shape inputShape;
         Shape outputShape;

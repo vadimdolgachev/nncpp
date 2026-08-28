@@ -13,6 +13,29 @@ find_package(MNIST REQUIRED CONFIG
 set(SANITIZER "" CACHE STRING "Optional sanitizer: address or thread")
 set_property(CACHE SANITIZER PROPERTY STRINGS "" address thread)
 
+set(SIMD "NONE" CACHE STRING "SIMD implementation: NONE or AVX2")
+set_property(CACHE SIMD PROPERTY STRINGS NONE AVX2)
+set(_nncpp_simd_values NONE AVX2)
+if(NOT SIMD IN_LIST _nncpp_simd_values)
+    message(FATAL_ERROR "Unsupported SIMD value '${SIMD}'. Expected NONE or AVX2.")
+endif()
+
+if(SIMD STREQUAL "AVX2")
+    if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64|i[3-6]86)$")
+        message(FATAL_ERROR "SIMD=AVX2 requires an x86 or x86-64 target architecture")
+    endif()
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        message(FATAL_ERROR "SIMD=AVX2 requires a GNU or Clang compatible compiler")
+    endif()
+
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag("-mavx2" NNCPP_COMPILER_SUPPORTS_MAVX2)
+    check_cxx_compiler_flag("-mfma" NNCPP_COMPILER_SUPPORTS_MFMA)
+    if(NOT NNCPP_COMPILER_SUPPORTS_MAVX2 OR NOT NNCPP_COMPILER_SUPPORTS_MFMA)
+        message(FATAL_ERROR "The compiler does not support the required AVX2 and FMA options")
+    endif()
+endif()
+
 function(configure_nncpp_compile target)
     target_compile_options(${target} PRIVATE
         -Wall
@@ -41,6 +64,9 @@ endfunction()
 
 add_library(nncpp_core src/network.cpp)
 target_include_directories(nncpp_core PUBLIC include)
+if(SIMD STREQUAL "AVX2")
+    target_compile_options(nncpp_core PRIVATE -mavx2 -mfma)
+endif()
 configure_nncpp_compile(nncpp_core)
 
 add_executable(nncpp main.cpp)
