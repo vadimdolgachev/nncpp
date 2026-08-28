@@ -8,7 +8,7 @@
 int main() {
     bool rejectedZeroDimension = false;
     try {
-        static_cast<void>(nncpp::DenseLayer(0, 4));
+        static_cast<void>(nncpp::DenseLayer(nncpp::Shape{0}, nncpp::Shape{4}));
     } catch (const std::invalid_argument&) {
         rejectedZeroDimension = true;
     }
@@ -16,7 +16,10 @@ int main() {
         throw std::runtime_error("constructor accepted a zero dimension");
     }
 
-    nncpp::DenseLayer layer(2, 4);
+    nncpp::DenseLayer layer(nncpp::Shape{2}, nncpp::Shape{4});
+    if (layer.getInputShape() != nncpp::Shape{2} || layer.getOutputShape() != nncpp::Shape{4}) {
+        throw std::runtime_error("dense layer shapes are incorrect");
+    }
     constexpr nncpp::Scalar xavierLimit = 1.0f;
     for (const nncpp::Scalar weight : layer.getWeights()) {
         if (weight < -xavierLimit || weight > xavierLimit) {

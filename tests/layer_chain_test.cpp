@@ -67,12 +67,12 @@ int main() {
     }
 
 
-    nncpp::DenseLayer dense1(2, 2);
+    nncpp::DenseLayer dense1(nncpp::Shape{2}, nncpp::Shape{2});
     dense1.setWeights({0.1, 0.2, -0.3, 0.4});
     dense1.setBiases({0.05, -0.1});
     nncpp::Sigmoid sigmoid1(2);
 
-    nncpp::DenseLayer dense2(2, 1);
+    nncpp::DenseLayer dense2(nncpp::Shape{2}, nncpp::Shape{1});
     dense2.setWeights({0.7, -0.5});
     dense2.setBiases({0.2});
     nncpp::Sigmoid sigmoid2(1);

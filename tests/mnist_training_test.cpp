@@ -102,8 +102,8 @@ int main() {
     }
 
     auto dense = std::make_unique<nncpp::DenseLayer>(
-        nncpp::detail::mnist::imageSize,
-        nncpp::detail::mnist::classCount
+        nncpp::Shape{nncpp::detail::mnist::imageSize},
+        nncpp::Shape{nncpp::detail::mnist::classCount}
     );
     auto *denseLayer = dense.get();
     denseLayer->setWeights(nncpp::Tensor(

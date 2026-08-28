@@ -19,11 +19,11 @@ namespace {
 
 int main() {
     expectThrows<std::invalid_argument>(
-        [] { static_cast<void>(nncpp::ReLU(0)); },
+        [] { static_cast<void>(nncpp::ReLU(nncpp::Shape{0})); },
         "zero-sized ReLU"
     );
 
-    nncpp::ReLU relu(3);
+    nncpp::ReLU relu(nncpp::Shape{3});
     expectThrows<std::logic_error>(
         [&relu] { static_cast<void>(relu.backward({1.0f, 1.0f, 1.0f})); },
         "ReLU backward before forward"

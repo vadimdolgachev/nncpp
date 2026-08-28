@@ -30,28 +30,33 @@ namespace {
 
 int main() {
     expectThrows<std::invalid_argument>(
-        [] { static_cast<void>(nncpp::MaxPool2d(0, 4, 4, 2, 2)); },
+        [] { static_cast<void>(nncpp::MaxPool2d(nncpp::Shape{1, 4}, 2, 2)); },
+        "non-CHW input shape"
+    );
+    expectThrows<std::invalid_argument>(
+        [] { static_cast<void>(nncpp::MaxPool2d(nncpp::Shape{0, 4, 4}, 2, 2)); },
         "zero channels"
     );
     expectThrows<std::invalid_argument>(
-        [] { static_cast<void>(nncpp::MaxPool2d(1, 0, 4, 2, 2)); },
+        [] { static_cast<void>(nncpp::MaxPool2d(nncpp::Shape{1, 4, 0}, 2, 2)); },
         "zero width"
     );
     expectThrows<std::invalid_argument>(
-        [] { static_cast<void>(nncpp::MaxPool2d(1, 4, 4, 0, 2)); },
+        [] { static_cast<void>(nncpp::MaxPool2d(nncpp::Shape{1, 4, 4}, 0, 2)); },
         "zero kernel"
     );
     expectThrows<std::invalid_argument>(
-        [] { static_cast<void>(nncpp::MaxPool2d(1, 4, 4, 5, 2)); },
+        [] { static_cast<void>(nncpp::MaxPool2d(nncpp::Shape{1, 4, 4}, 5, 2)); },
         "kernel larger than input"
     );
     expectThrows<std::invalid_argument>(
-        [] { static_cast<void>(nncpp::MaxPool2d(1, 4, 4, 2, 0)); },
+        [] { static_cast<void>(nncpp::MaxPool2d(nncpp::Shape{1, 4, 4}, 2, 0)); },
         "zero stride"
     );
 
-    nncpp::MaxPool2d pool(2, 4, 2, 2, 2);
-    if (pool.getOutputSize() != 4) {
+    nncpp::MaxPool2d pool(nncpp::Shape{2, 2, 4}, 2, 2);
+    if (pool.getInputShape() != nncpp::Shape{2, 2, 4} ||
+        pool.getOutputShape() != nncpp::Shape{2, 1, 2}) {
         throw std::runtime_error("output size is incorrect before forward");
     }
     expectThrows<std::logic_error>(
@@ -89,7 +94,7 @@ int main() {
         "repeated backward"
     );
 
-    nncpp::MaxPool2d overlapping(1, 3, 3, 2, 1);
+    nncpp::MaxPool2d overlapping(nncpp::Shape{1, 3, 3}, 2, 1);
     expectTensor(
         overlapping.forward({
             0.0f, 0.0f, 0.0f,
@@ -109,7 +114,7 @@ int main() {
         "overlapping input gradient"
     );
 
-    nncpp::MaxPool2d ties(1, 4, 2, 2, 2);
+    nncpp::MaxPool2d ties(nncpp::Shape{1, 2, 4}, 2, 2);
     const nncpp::Scalar lowest = std::numeric_limits<nncpp::Scalar>::lowest();
     expectTensor(
         ties.forward(nncpp::Tensor(8, lowest)),

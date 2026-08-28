@@ -77,9 +77,9 @@ namespace {
         const nncpp::Tensor targets = {1.0};
 
         std::array<std::unique_ptr<nncpp::Layer>, 4> network = {
-            std::make_unique<nncpp::DenseLayer>(2, 4),
+            std::make_unique<nncpp::DenseLayer>(nncpp::Shape{2}, nncpp::Shape{4}),
             std::make_unique<nncpp::Sigmoid>(4),
-            std::make_unique<nncpp::DenseLayer>(4, 1),
+            std::make_unique<nncpp::DenseLayer>(nncpp::Shape{4}, nncpp::Shape{1}),
             std::make_unique<nncpp::Sigmoid>(1),
         };
 
@@ -133,9 +133,9 @@ namespace {
 
         constexpr size_t hiddenLayerSize = 128;
         std::array<std::unique_ptr<nncpp::Layer>, 3> network = {
-            std::make_unique<nncpp::DenseLayer>(nncpp::detail::mnist::imageSize, hiddenLayerSize),
-            std::make_unique<nncpp::ReLU>(hiddenLayerSize),
-            std::make_unique<nncpp::DenseLayer>(hiddenLayerSize, nncpp::detail::mnist::classCount)
+            std::make_unique<nncpp::DenseLayer>(nncpp::Shape{nncpp::detail::mnist::imageSize}, nncpp::Shape{hiddenLayerSize}),
+            std::make_unique<nncpp::ReLU>(nncpp::Shape{hiddenLayerSize}),
+            std::make_unique<nncpp::DenseLayer>(nncpp::Shape{hiddenLayerSize}, nncpp::Shape{nncpp::detail::mnist::classCount})
         };
 
         nncpp::SoftmaxCategoricalCrossEntropy loss(nncpp::detail::mnist::classCount);
@@ -217,27 +217,28 @@ namespace {
         const auto dataset = mnist::read_dataset<std::vector, std::vector, uint8_t, uint8_t>(MNIST_DATA_LOCATION);
         nncpp::detail::mnist::validateDataset(dataset);
 
-        constexpr size_t inputChannels = 1;
+        constexpr nncpp::Shape inputShape = {1, 28, 28};
         constexpr size_t outputChannels = 8;
-        constexpr size_t w = 28;
-        constexpr size_t h = 28;
         constexpr size_t kernelSize = 3;
         constexpr size_t stride = 1;
-        auto convolution = std::make_unique<nncpp::Conv2d>(inputChannels, outputChannels, w, h, kernelSize, stride, nncpp::Conv2d::Padding::Same);
 
-        const size_t convOutputSize = convolution->getOutputSize();
-        const size_t convOutputWidth = convolution->getOutputWidth();
-        const size_t convOutputHeight = convolution->getOutputHeight();
+        auto convolution = std::make_unique<nncpp::Conv2d>(inputShape,
+                                                           outputChannels,
+                                                           kernelSize,
+                                                           stride,
+                                                           nncpp::Conv2d::Padding::Same);
 
-        auto maxPool2d = std::make_unique<nncpp::MaxPool2d>(outputChannels, convOutputWidth, convOutputHeight, 2, 2);
+        const auto &convOutputShape = convolution->getOutputShape();
 
-        const auto maxPool2dOutputSize = maxPool2d->getOutputSize();
+        auto maxPool2d = std::make_unique<nncpp::MaxPool2d>(convOutputShape, 2, 2);
+
+        const auto &maxPool2dOutputShape = maxPool2d->getOutputShape();
 
         std::array<std::unique_ptr<nncpp::Layer>, 4> network = {
             std::move(convolution),
-            std::make_unique<nncpp::ReLU>(convOutputSize),
+            std::make_unique<nncpp::ReLU>(convOutputShape),
             std::move(maxPool2d),
-            std::make_unique<nncpp::DenseLayer>(maxPool2dOutputSize, nncpp::detail::mnist::classCount)
+            std::make_unique<nncpp::DenseLayer>(maxPool2dOutputShape, nncpp::Shape{nncpp::detail::mnist::classCount})
         };
 
         nncpp::SoftmaxCategoricalCrossEntropy loss(nncpp::detail::mnist::classCount);

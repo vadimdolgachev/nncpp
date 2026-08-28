@@ -46,12 +46,18 @@ The examples below are code fragments that assume `<array>`, `<cstddef>`, `<memo
 
 ```cpp
 std::array<std::unique_ptr<nncpp::Layer>, 4> network = {
-    std::make_unique<nncpp::DenseLayer>(2, 4),
+    std::make_unique<nncpp::DenseLayer>(nncpp::Shape{2}, nncpp::Shape{4}),
     std::make_unique<nncpp::Sigmoid>(4),
-    std::make_unique<nncpp::DenseLayer>(4, 1),
+    std::make_unique<nncpp::DenseLayer>(nncpp::Shape{4}, nncpp::Shape{1}),
     std::make_unique<nncpp::Sigmoid>(1),
 };
 ```
+
+`Shape` records a tensor rank and dimensions. Spatial layers use conventional
+`{channels, height, width}` (CHW) shapes; `total()` returns the number of scalar
+values in the flattened `Tensor`. `CHWLayout` validates rank-3 shapes and provides
+named dimension accessors plus checked `(channel, y, x)` indexing. Element-wise
+layers preserve their input shape, while `DenseLayer` uses the complete input total.
 
 This represents:
 
@@ -99,11 +105,11 @@ $$
 This corresponds directly to `DenseLayer::forward()`:
 
 ```cpp
-for (size_t outIndex = 0; outIndex < outputSize; ++outIndex) {
+for (size_t outIndex = 0; outIndex < outputShape.total(); ++outIndex) {
     nncpp::Scalar z = biases[outIndex];
     
-    for (size_t inIndex = 0; inIndex < inputSize; ++inIndex) {
-        const size_t wIndex = inIndex + inputSize * outIndex;
+    for (size_t inIndex = 0; inIndex < inputShape.total(); ++inIndex) {
+        const size_t wIndex = inIndex + inputShape.total() * outIndex;
         z += weights[wIndex] * input[inIndex];
     }
     
@@ -126,7 +132,7 @@ weights = {
 with:
 
 ```cpp
-wIndex = inIndex + inputSize * outIndex;
+wIndex = inIndex + inputShape.total() * outIndex;
 ```
 
 The input is cached in `lastInput`, because it will later be required to calculate the weight gradients.

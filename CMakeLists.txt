@@ -51,6 +51,11 @@ configure_nncpp_executable(nncpp)
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(shape_test tests/shape_test.cpp)
+    target_link_libraries(shape_test PRIVATE nncpp_core)
+    configure_nncpp_executable(shape_test)
+    add_test(NAME shape COMMAND shape_test)
+
     add_executable(forward_pass_test tests/forward_pass_test.cpp)
     target_link_libraries(forward_pass_test PRIVATE nncpp_core)
     configure_nncpp_executable(forward_pass_test)

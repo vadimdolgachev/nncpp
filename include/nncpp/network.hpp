@@ -1,8 +1,11 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
+#include <initializer_list>
+#include <limits>
 #include <random>
 #include <stdexcept>
 #include <vector>
@@ -12,6 +15,91 @@ namespace nncpp {
     using Scalar = float;
     using Tensor = std::vector<Scalar>;
 
+    class Shape final {
+    public:
+        constexpr Shape(const std::initializer_list<size_t> dims)
+            : rank_(dims.size()),
+              total_(dims.size() == 0 ? 0 : 1) {
+            if (rank_ > dimensions.size()) {
+                throw std::invalid_argument("shape rank is too large");
+            }
+
+            size_t index = 0;
+            for (const size_t dimension : dims) {
+                dimensions[index++] = dimension;
+                if (dimension != 0 && total_ > std::numeric_limits<size_t>::max() / dimension) {
+                    throw std::overflow_error("shape total size overflows size_t");
+                }
+                total_ *= dimension;
+            }
+        }
+
+        [[nodiscard]] constexpr size_t rank() const noexcept {
+            return rank_;
+        }
+
+        [[nodiscard]] constexpr size_t operator[](const size_t i) const {
+            if (i >= rank_) {
+                throw std::out_of_range("shape dimension");
+            }
+            return dimensions[i];
+        }
+
+        [[nodiscard]] constexpr size_t total() const noexcept {
+            if (rank_ == 0) {
+                return 0;
+            }
+            return total_;
+        }
+
+        [[nodiscard]] constexpr bool operator==(const Shape &) const = default;
+
+    private:
+        std::array<size_t, 4> dimensions{};
+        size_t rank_ = 0;
+        size_t total_ = 0;
+    };
+
+    /**
+     * Interprets a rank-3 Shape using channels-height-width (CHW) order.
+     */
+    class CHWLayout final {
+    public:
+        explicit constexpr CHWLayout(const Shape &shape) : shape_(shape) {
+            if (shape_.rank() != 3) {
+                throw std::invalid_argument("CHW layout requires rank 3");
+            }
+        }
+
+        [[nodiscard]] constexpr size_t channels() const noexcept {
+            return shape_[0];
+        }
+
+        [[nodiscard]] constexpr size_t height() const noexcept {
+            return shape_[1];
+        }
+
+        [[nodiscard]] constexpr size_t width() const noexcept {
+            return shape_[2];
+        }
+
+        [[nodiscard]] constexpr size_t index(const size_t channel,
+                                             const size_t y,
+                                             const size_t x) const {
+            if (channel >= channels() || y >= height() || x >= width()) {
+                throw std::out_of_range("CHW coordinates");
+            }
+            return (channel * height() + y) * width() + x;
+        }
+
+        [[nodiscard]] constexpr const Shape &shape() const noexcept {
+            return shape_;
+        }
+
+    private:
+        Shape shape_;
+    };
+
     class Layer {
     public:
         virtual ~Layer() = default;
@@ -19,6 +107,10 @@ namespace nncpp {
         virtual Tensor forward(const Tensor &input) = 0;
 
         virtual Tensor backward(const Tensor &outputGradient) = 0;
+
+        [[nodiscard]] virtual const Shape &getInputShape() const noexcept = 0;
+
+        [[nodiscard]] virtual const Shape &getOutputShape() const noexcept = 0;
 
         virtual void applyGradient([[maybe_unused]] Scalar learningRate, [[maybe_unused]] size_t actualBatchSize) {
         }
@@ -29,7 +121,7 @@ namespace nncpp {
 
     class DenseLayer final : public Layer {
     public:
-        DenseLayer(std::size_t inputSize_, std::size_t outputSize_);
+        DenseLayer(const Shape &inputShape_, const Shape &outputShape_);
 
         [[nodiscard]] Tensor forward(const Tensor &input) override;
 
@@ -68,22 +160,27 @@ namespace nncpp {
 
         void setBiases(const Tensor &values);
 
+        [[nodiscard]] const Shape &getInputShape() const noexcept override;
+
+        [[nodiscard]] const Shape &getOutputShape() const noexcept override;
+
     private:
         void initWeights();
 
+        Shape inputShape;
+        Shape outputShape;
         Tensor weights;
         Tensor weightGradients;
         Tensor biases;
         Tensor biasGradients;
-        size_t inputSize;
-        size_t outputSize;
         Tensor lastInput;
         bool hasForwardResult = false;
     };
 
     class Sigmoid final : public Layer {
     public:
-        explicit Sigmoid(const size_t inputSize) : output(inputSize) {
+        explicit Sigmoid(const size_t inputSize) : inputShape({inputSize}),
+                                                   output(inputSize) {
         }
 
         /*
@@ -99,14 +196,19 @@ namespace nncpp {
          */
         [[nodiscard]] Tensor backward(const Tensor &outputGradient) override;
 
+        [[nodiscard]] const Shape &getInputShape() const noexcept override;
+
+        [[nodiscard]] const Shape &getOutputShape() const noexcept override;
+
     private:
+        Shape inputShape;
         Tensor output;
         bool hasForwardResult = false;
     };
 
     class ReLU final : public Layer {
     public:
-        explicit ReLU(size_t inputSize);
+        explicit ReLU(const Shape &inputShape_);
 
         /*
         * input: z
@@ -120,7 +222,12 @@ namespace nncpp {
          */
         [[nodiscard]] Tensor backward(const Tensor &outputGradient) override;
 
+        [[nodiscard]] const Shape &getInputShape() const noexcept override;
+
+        [[nodiscard]] const Shape &getOutputShape() const noexcept override;
+
     private:
+        Shape inputShape;
         Tensor output;
         bool hasForwardResult = false;
     };
@@ -136,10 +243,8 @@ namespace nncpp {
             Full
         };
 
-        Conv2d(size_t inputChannels_,
+        Conv2d(const Shape &inputShape_,
                size_t outputChannels_,
-               size_t width_,
-               size_t height_,
                size_t kernelSize_,
                size_t stride_,
                Padding padding_);
@@ -155,12 +260,6 @@ namespace nncpp {
 
         void resetGradients() override;
 
-        [[nodiscard]] size_t getOutputSize() const noexcept;
-
-        [[nodiscard]] size_t getOutputWidth() const noexcept;
-
-        [[nodiscard]] size_t getOutputHeight() const noexcept;
-
         [[nodiscard]] const Tensor &getWeights() const noexcept;
 
         [[nodiscard]] const Tensor &getWeightGradients() const noexcept;
@@ -173,23 +272,19 @@ namespace nncpp {
 
         void setBiases(const Tensor &values);
 
+        [[nodiscard]] const Shape &getInputShape() const noexcept override;
+
+        [[nodiscard]] const Shape &getOutputShape() const noexcept override;
+
     private:
         void initWeights();
 
         [[nodiscard]] size_t calculatePadding() const;
 
-        [[nodiscard]] size_t getOutputIndex(size_t channel, size_t y, size_t x) const noexcept;
+        [[nodiscard]] size_t getWeightIndex(size_t inChannelSize, size_t outChannel, size_t inChannel, size_t ky, size_t kx) const noexcept;
 
-        [[nodiscard]] size_t getInputIndex(size_t channel, size_t y, size_t x) const noexcept;
-
-        [[nodiscard]] size_t getWeightIndex(size_t outChannel, size_t inChannel, size_t ky, size_t kx) const noexcept;
-
-        size_t inputChannels;
-        size_t outputChannels;
-        size_t width;
-        size_t height;
-        size_t outputWidth;
-        size_t outputHeight;
+        Shape inputShape;
+        Shape outputShape;
         size_t kernelSize;
         size_t stride;
         Padding padding;
@@ -205,9 +300,7 @@ namespace nncpp {
 
     class MaxPool2d final : public Layer {
     public:
-        MaxPool2d(size_t channels_,
-                  size_t width_,
-                  size_t height_,
+        MaxPool2d(const Shape &inputShape_,
                   size_t kernelSize_,
                   size_t stride_);
 
@@ -215,18 +308,13 @@ namespace nncpp {
 
         [[nodiscard]] Tensor backward(const Tensor &outputGradient) override;
 
-        [[nodiscard]] size_t getOutputSize() const noexcept;
+        [[nodiscard]] const Shape &getInputShape() const noexcept override;
+
+        [[nodiscard]] const Shape &getOutputShape() const noexcept override;
 
     private:
-        [[nodiscard]] size_t getOutputIndex(size_t channel, size_t y, size_t x) const noexcept;
-
-        [[nodiscard]] size_t getInputIndex(size_t channel, size_t y, size_t x) const noexcept;
-
-        size_t channels;
-        size_t outputWidth;
-        size_t outputHeight;
-        size_t width;
-        size_t height;
+        Shape inputShape;
+        Shape outputShape;
         size_t kernelSize;
         size_t stride;
         Tensor output;

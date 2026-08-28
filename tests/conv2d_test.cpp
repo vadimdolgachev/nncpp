@@ -33,24 +33,30 @@ int main() {
     using Padding = nncpp::Conv2d::Padding;
 
     expectThrows<std::invalid_argument>(
-        [] { static_cast<void>(nncpp::Conv2d(0, 1, 3, 3, 1, 1, Padding::Valid)); },
+        [] { static_cast<void>(nncpp::Conv2d(nncpp::Shape{1, 3}, 1, 1, 1, Padding::Valid)); },
+        "non-CHW input shape"
+    );
+
+    expectThrows<std::invalid_argument>(
+        [] { static_cast<void>(nncpp::Conv2d(nncpp::Shape{0, 3, 3}, 1, 1, 1, Padding::Valid)); },
         "zero input channels"
     );
     expectThrows<std::invalid_argument>(
-        [] { static_cast<void>(nncpp::Conv2d(1, 1, 3, 3, 4, 1, Padding::Valid)); },
+        [] { static_cast<void>(nncpp::Conv2d(nncpp::Shape{1, 3, 3}, 1, 4, 1, Padding::Valid)); },
         "kernel larger than valid input"
     );
     expectThrows<std::invalid_argument>(
-        [] { static_cast<void>(nncpp::Conv2d(1, 1, 3, 3, 2, 1, Padding::Same)); },
+        [] { static_cast<void>(nncpp::Conv2d(nncpp::Shape{1, 3, 3}, 1, 2, 1, Padding::Same)); },
         "even same-padding kernel"
     );
     expectThrows<std::invalid_argument>(
-        [] { static_cast<void>(nncpp::Conv2d(1, 1, 3, 3, 3, 2, Padding::Same)); },
+        [] { static_cast<void>(nncpp::Conv2d(nncpp::Shape{1, 3, 3}, 1, 3, 2, Padding::Same)); },
         "strided same padding"
     );
 
-    nncpp::Conv2d layer(2, 1, 3, 2, 2, 1, Padding::Valid);
-    if (layer.getOutputWidth() != 2 || layer.getOutputHeight() != 1 || layer.getOutputSize() != 2) {
+    nncpp::Conv2d layer(nncpp::Shape{2, 2, 3}, 1, 2, 1, Padding::Valid);
+    if (layer.getInputShape() != nncpp::Shape{2, 2, 3} ||
+        layer.getOutputShape() != nncpp::Shape{1, 1, 2}) {
         throw std::runtime_error("Conv2d output shape is incorrect before forward");
     }
 
@@ -153,12 +159,12 @@ int main() {
     expectTensor(layer.getWeightGradients(), nncpp::Tensor(8, 0.0f), "reset weight gradients");
     expectTensor(layer.getBiasGradients(), {0.0f}, "reset bias gradients");
 
-    nncpp::Conv2d samePadding(1, 1, 2, 2, 5, 1, Padding::Same);
+    nncpp::Conv2d samePadding(nncpp::Shape{1, 2, 2}, 1, 5, 1, Padding::Same);
     nncpp::Tensor centerKernel(25, 0.0f);
     centerKernel[12] = 1.0f;
     samePadding.setWeights(centerKernel);
     samePadding.setBiases({0.0f});
-    if (samePadding.getOutputWidth() != 2 || samePadding.getOutputHeight() != 2) {
+    if (samePadding.getOutputShape() != nncpp::Shape{1, 2, 2}) {
         throw std::runtime_error("same padding did not preserve spatial dimensions");
     }
     expectTensor(
@@ -167,11 +173,10 @@ int main() {
         "same padding"
     );
 
-    nncpp::Conv2d fullPadding(1, 1, 2, 2, 5, 1, Padding::Full);
+    nncpp::Conv2d fullPadding(nncpp::Shape{1, 2, 2}, 1, 5, 1, Padding::Full);
     fullPadding.setWeights(centerKernel);
     fullPadding.setBiases({0.0f});
-    if (fullPadding.getOutputWidth() != 6 || fullPadding.getOutputHeight() != 6 ||
-        fullPadding.getOutputSize() != 36) {
+    if (fullPadding.getOutputShape() != nncpp::Shape{1, 6, 6}) {
         throw std::runtime_error("full padding output shape is incorrect");
     }
     nncpp::Tensor expectedFullOutput(36, 0.0f);
