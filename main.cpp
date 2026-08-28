@@ -44,7 +44,7 @@ namespace {
         return network;
     }
 
-    void simpleNetworkExample() {
+    [[maybe_unused]] void simpleNetworkExample() {
         const nncpp::Tensor input = {0.25, 0.5};
         const nncpp::Tensor targets = {1.0};
 
@@ -72,7 +72,7 @@ namespace {
         }
     }
 
-    void newNetworkExample() {
+    [[maybe_unused]] void newNetworkExample() {
         const nncpp::Tensor input = {0.25, 0.5};
         const nncpp::Tensor targets = {1.0};
 
@@ -123,7 +123,7 @@ namespace {
         }
     }
 
-    void MNISTTrainingDenseExample() {
+    [[maybe_unused]] void MNISTTrainingDenseExample() {
         constexpr size_t maxEpochs = 50;
         constexpr size_t batchSize = 32;
         constexpr std::uint32_t shuffleSeed = 42;

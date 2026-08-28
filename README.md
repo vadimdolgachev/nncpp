@@ -5,6 +5,7 @@ A minimal neural network implementation in modern C++ designed primarily to demo
 The current implementation provides:
 
 * fully connected (`DenseLayer`) layers;
+* convolution and max-pooling (`Conv2d`, `MaxPool2d`) layers;
 * sigmoid and ReLU activations (`Sigmoid`, `ReLU`);
 * summed half-squared-error loss (exposed through the `MSE` API);
 * fused softmax and categorical cross-entropy for classification;
@@ -27,8 +28,8 @@ ctest --test-dir build --output-on-failure
 ./build/nncpp
 ```
 
-The executable runs two small backpropagation demonstrations followed by the
-50-epoch MNIST example. The repository includes the MNIST files under
+The executable runs the 50-epoch convolutional MNIST example. The repository
+includes the MNIST files under
 `third_party/mnist/`; malformed or incomplete training and test splits are
 rejected before training starts.
 
@@ -220,7 +221,65 @@ Its backward pass forwards the incoming gradient where the cached activation
 is positive and returns zero elsewhere. As with `Sigmoid`, call `forward()`
 before each `backward()` call.
 
+### Conv2d Layer
+
+`Conv2d` applies learnable square kernels to a CHW tensor. Its constructor takes
+the input shape, number of output channels, kernel size, stride, and padding:
+
+```cpp
+nncpp::Conv2d convolution(
+    nncpp::Shape{1, 28, 28},
+    8,
+    3,
+    1,
+    nncpp::Conv2d::Padding::Same
+);
+```
+
+For input height $H$, width $W$, kernel size $K$, stride $S$, and padding $P$
+on each side, the spatial output dimensions are:
+
+$$
+H_{out}=\left\lfloor\frac{H+2P-K}{S}\right\rfloor+1,
+\qquad
+W_{out}=\left\lfloor\frac{W+2P-K}{S}\right\rfloor+1
+$$
+
+`Padding::Valid` uses no padding, `Padding::Same` preserves spatial dimensions
+for an odd kernel with stride 1, and `Padding::Full` uses $K-1$ zeros on every
+side. `backward()` returns the input gradient and accumulates kernel and bias
+gradients. Call `resetGradients()` before a new batch and
+`applyGradient(learningRate, batchSize)` after accumulating that batch.
+
+### MaxPool2d Layer
+
+`MaxPool2d` performs non-padded max pooling independently in every channel:
+
+```cpp
+nncpp::MaxPool2d pool(convolution.getOutputShape(), 2, 2);
+```
+
+Its output dimensions use the same formula with $P=0$. The forward pass caches
+the selected input index for each pooling window. `backward()` routes the output
+gradient to those indices; gradients are summed when overlapping windows select
+the same input. Equal maxima deterministically select the first value visited.
+The layer has no trainable parameters.
+
 ## Loss Functions
+
+### Loss Interface
+
+`Loss` is the polymorphic interface for scalar objectives:
+
+```cpp
+const nncpp::Scalar value = loss.forward(logits, target);
+const nncpp::Tensor &gradient = loss.backward();
+```
+
+`forward()` evaluates one sample and caches the state needed by `backward()`,
+which returns the gradient with respect to the loss input. Call `forward()`
+before each `backward()` call. The standalone `MSE` functions predate this
+interface and expose their derivative through `derivativeMSE()` instead.
 
 ### Summed Half-Squared Error
 
@@ -267,7 +326,9 @@ where $a_L$ is the final network output.
 
 For multi-class classification, `SoftmaxCategoricalCrossEntropy` accepts raw
 logits and a target distribution whose values are nonnegative and sum to one.
-It combines numerically stable softmax and cross-entropy in one operation:
+The class count passed to its constructor must match both tensor sizes. Logits
+and targets must be finite. It combines numerically stable softmax and
+cross-entropy in one operation:
 
 $$
 E=-\sum_i y_i\log p_i,
@@ -285,8 +346,12 @@ $$
 ```cpp
 nncpp::SoftmaxCategoricalCrossEntropy loss(10);
 const nncpp::Scalar sampleLoss = loss.forward(logits, target);
-auto gradient = loss.backward();
+const nncpp::Tensor &gradient = loss.backward();
 ```
+
+Softmax subtracts the largest logit before exponentiation, avoiding overflow for
+large finite inputs. `backward()` consumes the most recent forward result and
+must not be called twice without another `forward()`.
 
 ## Backpropagation
 
@@ -556,7 +621,7 @@ where $\eta$ is the learning rate.
 This corresponds to:
 
 ```cpp
-layer->applyGradient(learningRate);
+layer->applyGradient(learningRate, batchSize);
 ```
 
 Gradients are explicitly cleared before accumulating a new set:
@@ -565,7 +630,10 @@ Gradients are explicitly cleared before accumulating a new set:
 layer->resetGradients();
 ```
 
-`Layer` provides no-op implementations of `applyGradient()` and `resetGradients()`. This lets the generic loop call both operations on every layer; `DenseLayer` overrides them, while activation layers such as `Sigmoid` require no parameter update.
+`Layer` provides no-op implementations of `applyGradient()` and
+`resetGradients()`. This lets the generic loop call both operations on every
+layer; `DenseLayer` and `Conv2d` override them, while activation and pooling
+layers require no parameter update.
 
 The separation between
 
@@ -616,7 +684,7 @@ for (std::size_t iteration = 0; iteration < 1'000'000; ++iteration) {
 
     // Gradient descent
     for (const auto& layer : network) {
-        layer->applyGradient(learningRate);
+        layer->applyGradient(learningRate, 1);
     }
 }
 ```
@@ -649,11 +717,12 @@ updated parameters
 
 ## MNIST Training Example
 
-`MNISTTrainingExample()` builds a `784 → 128 → 10` classifier using a ReLU
-hidden layer and fused softmax cross-entropy loss. Each epoch shuffles training
-indices with a reproducible `std::mt19937` sequence seeded with `42`. Input and
-one-hot target buffers are reused, while dense-layer gradients accumulate over
-32 samples and are scaled to the batch mean before the parameter update.
+`MNISTTrainingConv2dExample()` builds a
+`1×28×28 → Conv2d(8, 3×3) → ReLU → MaxPool2d(2×2) → Dense(10)` classifier with
+fused softmax cross-entropy loss. Each epoch shuffles training indices with a
+reproducible `std::mt19937` sequence seeded with `42`. Input and one-hot target
+buffers are reused, while trainable-layer gradients accumulate over 32 samples
+and are scaled to the batch mean before the parameter update.
 
 After every epoch, the example reports average online training loss and
 fixed-test-set loss and accuracy:
