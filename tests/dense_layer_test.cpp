@@ -5,7 +5,63 @@
 #include <stdexcept>
 #include <vector>
 
+namespace {
+    void checkBackwardBoundary(const std::size_t inputSize) {
+        constexpr std::size_t outputSize = 3;
+        const nncpp::Tensor outputGradient = {0.5f, -0.75f, 1.25f};
+        nncpp::DenseLayer layer(nncpp::Shape{inputSize}, nncpp::Shape{outputSize});
+        nncpp::Tensor input(inputSize);
+        nncpp::Tensor weights(inputSize * outputSize);
+
+        for (std::size_t i = 0; i < inputSize; ++i) {
+            input[i] = static_cast<nncpp::Scalar>(static_cast<int>(i % 9) - 4) * 0.125f;
+        }
+        for (std::size_t i = 0; i < weights.size(); ++i) {
+            weights[i] = static_cast<nncpp::Scalar>(static_cast<int>(i % 13) - 6) * 0.0625f;
+        }
+
+        layer.setWeights(weights);
+        layer.setBiases(nncpp::Tensor(outputSize, 0.0f));
+        layer.resetGradients();
+
+        static_cast<void>(layer.forward(input));
+        const nncpp::Tensor firstInputGradient = layer.backward(outputGradient);
+        static_cast<void>(layer.forward(input));
+        const nncpp::Tensor secondInputGradient = layer.backward(outputGradient);
+
+        for (std::size_t inIndex = 0; inIndex < inputSize; ++inIndex) {
+            nncpp::Scalar expectedInputGradient = 0.0f;
+            for (std::size_t outIndex = 0; outIndex < outputSize; ++outIndex) {
+                const std::size_t weightIndex = outIndex * inputSize + inIndex;
+                expectedInputGradient += weights[weightIndex] * outputGradient[outIndex];
+                expectNear(
+                    layer.getWeightGradients()[weightIndex],
+                    2.0f * input[inIndex] * outputGradient[outIndex],
+                    "accumulated boundary weight gradient"
+                );
+            }
+            expectNear(firstInputGradient[inIndex], expectedInputGradient, "boundary input gradient");
+            expectNear(secondInputGradient[inIndex], expectedInputGradient, "repeated boundary input gradient");
+        }
+
+        for (std::size_t outIndex = 0; outIndex < outputSize; ++outIndex) {
+            expectNear(
+                layer.getBiasGradients()[outIndex],
+                2.0f * outputGradient[outIndex],
+                "accumulated boundary bias gradient"
+            );
+        }
+    }
+}
+
 int main() {
+    constexpr std::array<std::size_t, 10> boundarySizes = {
+        1, 7, 8, 9, 15, 16, 17, 31, 32, 33,
+    };
+    for (const std::size_t inputSize : boundarySizes) {
+        checkBackwardBoundary(inputSize);
+    }
+
     bool rejectedZeroDimension = false;
     try {
         static_cast<void>(nncpp::DenseLayer(nncpp::Shape{0}, nncpp::Shape{4}));

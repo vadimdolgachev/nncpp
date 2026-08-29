@@ -8,8 +8,13 @@
 #include <cmath>
 #include <random>
 #include <stdexcept>
+#include <type_traits>
 
 namespace nncpp {
+#if defined(__AVX2__)
+    static_assert(std::is_same_v<Scalar, float>, "Scalar must be float");
+#endif
+
     Scalar sigmoid(const Scalar value) {
         return 1.0f / (1.0f + std::exp(-value));
     }
@@ -41,27 +46,27 @@ namespace nncpp {
         Tensor output(outTotal, 0);
 #if defined(__AVX2__)
         for (size_t outIndex = 0; outIndex < outTotal; ++outIndex) {
-            const Scalar z = biases[outIndex];
-            const Scalar *W = weights.data() + inTotal * outIndex;
-            const Scalar *x = input.data();
+            const auto z = biases[outIndex];
+            const auto *const W = weights.data() + inTotal * outIndex;
+            const auto *const x = input.data();
 
-            __m256 m_sum1 = _mm256_setzero_ps();
-            __m256 m_sum2 = _mm256_setzero_ps();
+            __m256 mSum1 = _mm256_setzero_ps();
+            __m256 mSum2 = _mm256_setzero_ps();
 
             size_t i = 0;
             for (; i + 15 < inTotal; i += 16) {
-                m_sum1 = _mm256_fmadd_ps(_mm256_loadu_ps(&W[i]), _mm256_loadu_ps(&x[i]), m_sum1);
-                m_sum2 = _mm256_fmadd_ps(_mm256_loadu_ps(&W[i + 8]), _mm256_loadu_ps(&x[i + 8]), m_sum2);
+                mSum1 = _mm256_fmadd_ps(_mm256_loadu_ps(&W[i]), _mm256_loadu_ps(&x[i]), mSum1);
+                mSum2 = _mm256_fmadd_ps(_mm256_loadu_ps(&W[i + 8]), _mm256_loadu_ps(&x[i + 8]), mSum2);
             }
 
-            m_sum1 = _mm256_add_ps(m_sum1, m_sum2);
+            mSum1 = _mm256_add_ps(mSum1, mSum2);
 
             for (; i + 7 < inTotal; i += 8) {
-                m_sum1 = _mm256_fmadd_ps(_mm256_loadu_ps(&W[i]), _mm256_loadu_ps(&x[i]), m_sum1);
+                mSum1 = _mm256_fmadd_ps(_mm256_loadu_ps(&W[i]), _mm256_loadu_ps(&x[i]), mSum1);
             }
 
-            __m128 xlow = _mm256_castps256_ps128(m_sum1);
-            __m128 xhigh = _mm256_extractf128_ps(m_sum1, 1);
+            __m128 xlow = _mm256_castps256_ps128(mSum1);
+            const __m128 xhigh = _mm256_extractf128_ps(mSum1, 1);
             xlow = _mm_add_ps(xlow, xhigh);
             __m128 xshuf = _mm_movehl_ps(xlow, xlow);
             xlow = _mm_add_ps(xlow, xshuf);
@@ -77,10 +82,10 @@ namespace nncpp {
             output[outIndex] = z + zSimd;
         }
 #else
-        for (size_t outIndex = 0; outIndex < outputShape.total(); ++outIndex) {
+        for (size_t outIndex = 0; outIndex < outTotal; ++outIndex) {
             Scalar z = biases[outIndex];
-            for (size_t inIndex = 0; inIndex < inputShape.total(); ++inIndex) {
-                const size_t wIndex = inIndex + inputShape.total() * outIndex;
+            for (size_t inIndex = 0; inIndex < inTotal; ++inIndex) {
+                const size_t wIndex = inIndex + inTotal * outIndex;
                 z += weights[wIndex] * input[inIndex];
             }
             output[outIndex] = z;
@@ -101,16 +106,48 @@ namespace nncpp {
         }
 
         Tensor inputGradient(inputShape.total(), 0);
+        const size_t inTotal = inputShape.total();
+#if defined(__AVX2__)
+        auto *const igPtr = inputGradient.data();
+        const auto *const wBase = weights.data();
+        auto *const wgBase = weightGradients.data();
 
         for (size_t outIndex = 0; outIndex < outputShape.total(); ++outIndex) {
             const auto grad = outputGradient[outIndex];
             biasGradients[outIndex] += grad;
-            for (size_t inIndex = 0; inIndex < inputShape.total(); ++inIndex) {
-                const size_t wIndex = inIndex + inputShape.total() * outIndex;
+            auto *const wg = wgBase + inTotal * outIndex;
+            const auto *const w = wBase + inTotal * outIndex;
+
+            const __m256 mGrads = _mm256_set1_ps(grad);
+            size_t i = 0;
+            for (; i + 7 < inTotal; i += 8) {
+                __m256 mWg = _mm256_loadu_ps(&wg[i]);
+                const __m256 mIn = _mm256_loadu_ps(&lastInput[i]);
+                mWg = _mm256_fmadd_ps(mIn, mGrads, mWg);
+                _mm256_storeu_ps(&wg[i], mWg);
+
+                __m256 mIg = _mm256_loadu_ps(&igPtr[i]);
+                const __m256 mW = _mm256_loadu_ps(&w[i]);
+                mIg = _mm256_fmadd_ps(mW, mGrads, mIg);
+                _mm256_storeu_ps(&igPtr[i], mIg);
+            }
+
+            for (; i < inTotal; ++i) {
+                wg[i] += lastInput[i] * grad;
+                igPtr[i] += w[i] * grad;
+            }
+        }
+#else
+        for (size_t outIndex = 0; outIndex < outputShape.total(); ++outIndex) {
+            const auto grad = outputGradient[outIndex];
+            biasGradients[outIndex] += grad;
+            for (size_t inIndex = 0; inIndex < inTotal; ++inIndex) {
+                const size_t wIndex = inIndex + inTotal * outIndex;
                 weightGradients[wIndex] += lastInput[inIndex] * grad;
                 inputGradient[inIndex] += weights[wIndex] * grad;
             }
         }
+#endif
         hasForwardResult = false;
         return inputGradient;
     }
