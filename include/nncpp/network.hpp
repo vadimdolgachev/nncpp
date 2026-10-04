@@ -254,6 +254,11 @@ namespace nncpp {
          */
         [[nodiscard]] Tensor forward(const Tensor &input) override;
 
+        /**
+         * Returns dE/d(input) in CHW order and accumulates weight and bias gradients.
+         * Consumes the latest successful forward result; parameters are not updated.
+         * Throws std::logic_error without that result or for a mismatched gradient size.
+         */
         [[nodiscard]] Tensor backward(const Tensor &outputGradient) override;
 
         void applyGradient(Scalar learningRate, size_t batchSize) override;

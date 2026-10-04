@@ -41,6 +41,17 @@ cmake --build build-asan
 ctest --test-dir build-asan --output-on-failure
 ```
 
+AVX2/FMA acceleration is optional and selected at build time:
+
+```bash
+cmake -S . -B build-avx2 -DCMAKE_BUILD_TYPE=Release -DSIMD=AVX2
+cmake --build build-avx2
+ctest --test-dir build-avx2 --output-on-failure
+```
+
+The default is `SIMD=NONE`. AVX2 builds require an x86/x86-64 target, a
+GNU/Clang-compatible compiler, and an AVX2+FMA-capable CPU at runtime.
+
 ## Network Model
 
 The examples below are code fragments that assume `<array>`, `<cstddef>`, `<memory>`, `<ranges>`, and `nncpp/network.hpp` are included. A network can be constructed as:
@@ -250,6 +261,20 @@ for an odd kernel with stride 1, and `Padding::Full` uses $K-1$ zeros on every
 side. `backward()` returns the input gradient and accumulates kernel and bias
 gradients. Call `resetGradients()` before a new batch and
 `applyGradient(learningRate, batchSize)` after accumulating that batch.
+
+With `SIMD=AVX2`, `forward()` computes eight adjacent output values at a time
+when stride is 1 and all eight kernel windows fit inside the input. Padding
+boundaries, row tails, and other strides use scalar computation. CHW storage and
+the public API are unchanged; FMA can introduce small floating-point rounding
+differences compared with a scalar build.
+
+`backward()` also uses AVX2/FMA for stride 1 and output widths of at least eight.
+It processes adjacent positions across each output row, accumulating both input
+and kernel gradients. Zero-padded temporary buffers cover all padding modes;
+row tails, short rows, and other strides use scalar computation. Bias gradients
+remain scalar. FMA and reordered sums can cause small rounding differences.
+Each successful `backward()` consumes the preceding forward result; another
+backward pass requires a new `forward()` call.
 
 ### MaxPool2d Layer
 

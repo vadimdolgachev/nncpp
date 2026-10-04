@@ -108,7 +108,6 @@ namespace nncpp {
         Tensor inputGradient(inputShape.total(), 0);
         const size_t inTotal = inputShape.total();
 #if defined(__AVX2__)
-        auto *const igPtr = inputGradient.data();
         const auto *const wBase = weights.data();
         auto *const wgBase = weightGradients.data();
 
@@ -126,15 +125,15 @@ namespace nncpp {
                 mWg = _mm256_fmadd_ps(mIn, mGrads, mWg);
                 _mm256_storeu_ps(&wg[i], mWg);
 
-                __m256 mIg = _mm256_loadu_ps(&igPtr[i]);
+                __m256 mIg = _mm256_loadu_ps(&inputGradient[i]);
                 const __m256 mW = _mm256_loadu_ps(&w[i]);
                 mIg = _mm256_fmadd_ps(mW, mGrads, mIg);
-                _mm256_storeu_ps(&igPtr[i], mIg);
+                _mm256_storeu_ps(&inputGradient[i], mIg);
             }
 
             for (; i < inTotal; ++i) {
                 wg[i] += lastInput[i] * grad;
-                igPtr[i] += w[i] * grad;
+                inputGradient[i] += w[i] * grad;
             }
         }
 #else
@@ -353,9 +352,46 @@ namespace nncpp {
         const auto iWidth = inputLayout.width();
         const auto iHeight = inputLayout.height();
 
+#if defined(__AVX2__)
+        const size_t internalWidth = iWidth >= kernelSize ? iWidth - kernelSize + 1 : 0;
+        const size_t internalEnd = paddingSize + internalWidth;
+#endif
         for (size_t och = 0; och < oChannels; ++och) {
             for (size_t oy = 0; oy < oHeight; ++oy) {
-                for (size_t ox = 0; ox < oWidth; ++ox) {
+#if defined(__AVX2__)
+                const bool vectorizeRow = stride == 1 && internalWidth >= 8
+                                          && iHeight >= kernelSize && oy >= paddingSize
+                                          && oy - paddingSize <= iHeight - kernelSize;
+#endif
+                for (size_t ox = 0; ox < oWidth;) {
+#if defined(__AVX2__)
+                    // All eight windows must lie entirely inside the input.
+                    if (vectorizeRow && ox >= paddingSize && ox < internalEnd
+                        && internalEnd - ox >= 8 && oWidth - ox >= 8) {
+                        const size_t inputY = oy - paddingSize;
+                        const size_t inputX = ox - paddingSize;
+                        __m256 sums = _mm256_set1_ps(biases[och]);
+
+                        for (size_t ich = 0; ich < iChannels; ++ich) {
+                            for (size_t ky = 0; ky < kernelSize; ++ky) {
+                                const auto *const inputRow = input.data()
+                                                             + inputLayout.index(ich, inputY + ky, inputX);
+                                const auto *const kernelRow = weights.data()
+                                                              + getWeightIndex(iChannels, och, ich, ky, 0);
+
+                                for (size_t kx = 0; kx < kernelSize; ++kx) {
+                                    const __m256 values = _mm256_loadu_ps(inputRow + kx);
+                                    const __m256 weight = _mm256_set1_ps(kernelRow[kx]);
+                                    sums = _mm256_fmadd_ps(values, weight, sums);
+                                }
+                            }
+                        }
+
+                        _mm256_storeu_ps(output.data() + outputLayout.index(och, oy, ox), sums);
+                        ox += 8;
+                        continue;
+                    }
+#endif
                     auto sum = biases[och];
 
                     for (size_t ich = 0; ich < iChannels; ++ich) {
@@ -382,6 +418,7 @@ namespace nncpp {
                     }
 
                     output[outputLayout.index(och, oy, ox)] = sum;
+                    ++ox;
                 }
             }
         }
@@ -398,8 +435,6 @@ namespace nncpp {
             throw std::logic_error("Conv2d gradient size does not match output");
         }
 
-        Tensor inputGradient(inputShape.total(), Scalar{0});
-
         const CHWLayout outputLayout(outputShape);
         const CHWLayout inputLayout(inputShape);
         const auto oChannels = outputLayout.channels();
@@ -409,36 +444,123 @@ namespace nncpp {
         const auto iWidth = inputLayout.width();
         const auto iHeight = inputLayout.height();
 
+        const size_t pWidth = iWidth + 2 * paddingSize;
+        const size_t pHeight = iHeight + 2 * paddingSize;
+        const size_t pChannelStride = pHeight * pWidth;
+
+        // Zero padding makes every kernel window a valid range in these buffers.
+        Tensor paddedInputGradient(iChannels * pChannelStride, 0.0f);
+        Tensor paddedLastInput(iChannels * pChannelStride, 0.0f);
+
+        for (size_t ich = 0; ich < iChannels; ++ich) {
+            for (size_t iy = 0; iy < iHeight; ++iy) {
+                const size_t srcIdx = inputLayout.index(ich, iy, 0);
+                const size_t dstIdx = ich * pChannelStride + (iy + paddingSize) * pWidth + paddingSize;
+                std::copy_n(&lastInput[srcIdx], iWidth, &paddedLastInput[dstIdx]);
+            }
+        }
+
         for (size_t och = 0; och < oChannels; ++och) {
+            Scalar biasGradSum = 0.0f;
+            const size_t baseIdx = outputLayout.index(och, 0, 0);
+            const size_t totalPixels = oHeight * oWidth;
+            for (size_t p = 0; p < totalPixels; ++p) {
+                biasGradSum += outputGradient[baseIdx + p];
+            }
+            biasGradients[och] += biasGradSum;
+        }
+
+#if defined(__AVX2__)
+        if (stride == 1 && oWidth >= 8) {
+            const __m256 zero = _mm256_setzero_ps();
+            for (size_t och = 0; och < oChannels; ++och) {
+                for (size_t ich = 0; ich < iChannels; ++ich) {
+                    for (size_t ky = 0; ky < kernelSize; ++ky) {
+                        for (size_t kx = 0; kx < kernelSize; ++kx) {
+                            const size_t weightIdx = getWeightIndex(iChannels, och, ich, ky, kx);
+                            const auto weight = weights[weightIdx];
+                            const __m256 mWeight = _mm256_set1_ps(weight);
+                            __m256 mWeightGradSum = zero;
+                            Scalar tailWeightGradSum = 0.0f;
+
+                            for (size_t oy = 0; oy < oHeight; ++oy) {
+                                const auto *const gradRow = outputGradient.data() + outputLayout.index(och, oy, 0);
+                                const size_t rowIdx = ich * pChannelStride + (oy + ky) * pWidth + kx;
+                                const auto *const inputRow = paddedLastInput.data() + rowIdx;
+                                auto *const inputGradRow = paddedInputGradient.data() + rowIdx;
+
+                                // At stride 1, eight outputs address eight contiguous input positions.
+                                size_t ox = 0;
+                                for (; oWidth - ox >= 8; ox += 8) {
+                                    const __m256 mGrad = _mm256_loadu_ps(gradRow + ox);
+                                    const __m256 active = _mm256_cmp_ps(mGrad, zero, _CMP_NEQ_UQ);
+                                    if (_mm256_movemask_ps(active) == 0) {
+                                        continue;
+                                    }
+                                    const __m256 mInput = _mm256_loadu_ps(inputRow + ox);
+                                    const __m256 mInputGrad = _mm256_loadu_ps(inputGradRow + ox);
+                                    // Inactive lanes must leave accumulators unchanged, just like the scalar skip.
+                                    mWeightGradSum = _mm256_blendv_ps(
+                                        mWeightGradSum, _mm256_fmadd_ps(mInput, mGrad, mWeightGradSum), active);
+                                    const __m256 updatedInputGrad = _mm256_blendv_ps(
+                                        mInputGrad, _mm256_fmadd_ps(mWeight, mGrad, mInputGrad), active);
+                                    _mm256_storeu_ps(inputGradRow + ox, updatedInputGrad);
+                                }
+                                for (; ox < oWidth; ++ox) {
+                                    const auto grad = gradRow[ox];
+                                    if (grad == 0.0f) {
+                                        continue;
+                                    }
+                                    tailWeightGradSum += inputRow[ox] * grad;
+                                    inputGradRow[ox] += weight * grad;
+                                }
+                            }
+
+                            // Reduce once per weight, then accumulate this sample into the batch.
+                            __m128 sum = _mm_add_ps(_mm256_castps256_ps128(mWeightGradSum),
+                                                    _mm256_extractf128_ps(mWeightGradSum, 1));
+                            sum = _mm_add_ps(sum, _mm_movehl_ps(sum, sum));
+                            sum = _mm_add_ss(sum, _mm_shuffle_ps(sum, sum, 1));
+                            weightGradients[weightIdx] += _mm_cvtss_f32(sum) + tailWeightGradSum;
+                        }
+                    }
+                }
+            }
+        } else
+#endif
+        {
             for (size_t oy = 0; oy < oHeight; ++oy) {
                 for (size_t ox = 0; ox < oWidth; ++ox) {
-                    const auto grad = outputGradient[outputLayout.index(och, oy, ox)];
-                    biasGradients[och] += grad;
-
-                    for (size_t ich = 0; ich < iChannels; ++ich) {
+                    const size_t pYStart = oy * stride;
+                    const size_t pXStart = ox * stride;
+                    for (size_t och = 0; och < oChannels; ++och) {
+                        const Scalar grad = outputGradient[outputLayout.index(och, oy, ox)];
+                        if (grad == 0.0f) {
+                            continue;
+                        }
                         for (size_t ky = 0; ky < kernelSize; ++ky) {
                             for (size_t kx = 0; kx < kernelSize; ++kx) {
-                                const auto iy = static_cast<std::ptrdiff_t>(oy * stride + ky) -
-                                                static_cast<std::ptrdiff_t>(paddingSize);
-                                const auto ix = static_cast<std::ptrdiff_t>(ox * stride + kx) -
-                                                static_cast<std::ptrdiff_t>(paddingSize);
-
-                                if (iy < 0
-                                    || ix < 0
-                                    || static_cast<size_t>(iy) >= iHeight
-                                    || static_cast<size_t>(ix) >= iWidth) {
-                                    continue;
+                                const size_t pInIdxBase = (pYStart + ky) * pWidth + pXStart + kx;
+                                for (size_t ich = 0; ich < iChannels; ++ich) {
+                                    const size_t pInIdx = ich * pChannelStride + pInIdxBase;
+                                    const size_t weightIdx = getWeightIndex(iChannels, och, ich, ky, kx);
+                                    weightGradients[weightIdx] += paddedLastInput[pInIdx] * grad;
+                                    paddedInputGradient[pInIdx] += weights[weightIdx] * grad;
                                 }
-
-                                const size_t inputIdx = inputLayout.index(
-                                    ich, static_cast<size_t>(iy), static_cast<size_t>(ix));
-                                const size_t weightIdx = getWeightIndex(iChannels, och, ich, ky, kx);
-                                weightGradients[weightIdx] += lastInput[inputIdx] * grad;
-                                inputGradient[inputIdx] += weights[weightIdx] * grad;
                             }
                         }
                     }
                 }
+            }
+        }
+
+        // Discard gradients of the artificial padding.
+        Tensor inputGradient(inputShape.total(), 0.0f);
+        for (size_t ich = 0; ich < iChannels; ++ich) {
+            for (size_t iy = 0; iy < iHeight; ++iy) {
+                const size_t srcIdx = ich * pChannelStride + (iy + paddingSize) * pWidth + paddingSize;
+                const size_t dstIdx = inputLayout.index(ich, iy, 0);
+                std::copy_n(&paddedInputGradient[srcIdx], iWidth, &inputGradient[dstIdx]);
             }
         }
 
